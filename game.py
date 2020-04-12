@@ -3,6 +3,8 @@ import threading
 
 from communication import OverwritableSlot
 
+printedSuits = ['S', 'C', 'H', 'D']
+printedCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 
 def constantMatrix(value, rows, columns):
     return [[value for _ in range(columns)] for _ in range(rows)]
@@ -10,15 +12,14 @@ def constantMatrix(value, rows, columns):
 
 def printState(state):
     result = [
-        '\n'.join([' '.join([str(value) for value in suit]) for suit in cards])
+        '\n'.join(' '.join(str(value) for value in suit) for suit in cards)
         for cards in state
     ]
     print('\n\n'.join(result) + '\n')
 
 
 def toString(card):
-    suits = ['S', 'C', 'H', 'D']
-    return f'{card[0]} {suits[card[1]]}'
+    return f'{printedCards[card[0]]} {printedSuits[card[1]]}'
 
 
 def getCards(state, category):
@@ -64,6 +65,7 @@ class Game:
         closedAttack = constantMatrix(0, 4, 13)
         defence = constantMatrix(0, 4, 13)
         trumps = constantMatrix(random.randrange(4), 4, 13)
+        print(f'\nTrumps are {printedSuits[trumps[0][0]]}.\n')
 
         pack, playerCards = self._dealCards()
 
@@ -114,7 +116,7 @@ class Game:
 
     def _pickUpCards(self):
         # Previous methods must increment attacker/defender
-        pack = self._getCards(self.pack)
+        pack = getCards(self.state, self.pack)
         random.shuffle(pack)
 
         # Defender picks up first, then attacker, then others.
@@ -149,24 +151,37 @@ class Game:
         with self.lock:
             pass
 
-    def attack(self, player, attackingCards):
+    def attack(self, player, playerState, attackingCards):
         with self.lock:
-            pass
+            latestPlayerState = self._playerState(player)
+            if playerState != latestPlayerState:
+                # Player is acting on old information - reject this action.
+                return
+
+            print(f'Player {player} attacks with {", ".join([toString(card) for card in attackingCards])}...')
+            # If attacking with multiple cards, check all the values are the same
+            assert len(set(value for (value, suit) in attackingCards)) == 1
+            assert all(self.state[player][suit][value] == 1 for (value, suit) in attackingCards)
+
+            for (value, suit) in attackingCards:
+                self.state[player][suit][value] = 0
+                self.state[self.openAttack][suit][value] = 1
+
+            self._updatePlayers()
 
     def bounce(self, player, playerState, bounceCard):
         with self.lock:
             latestPlayerState = self._playerState(player)
             if playerState != latestPlayerState:
                 # Player is acting on old information - reject this action.
-                return # latestPlayerState
+                return
 
     def defend(self, player, playerState, defendingCard, attackingCard):
-        # If successful, this ends the turn, new cards need to be dealt
         with self.lock:
             latestPlayerState = self._playerState(player)
             if playerState != latestPlayerState:
                 # Player is acting on old information - reject this action.
-                return # latestPlayerState
+                return
 
             print(f'Player {player} defends {toString(attackingCard)} with {toString(defendingCard)}...')
             (attackingCardValue, attackingCardSuit) = attackingCard
@@ -175,7 +190,8 @@ class Game:
             # ToDo: shouldn't need these in future:
             assert self.state[self.openAttack][attackingCardSuit][attackingCardValue] == 1
             assert self.state[player][defendingCardSuit][defendingCardValue] == 1
-            assert defendingCardValue > attackingCardValue
+            assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) or \
+                defendingCardSuit == self.state[self.trumps][0][0]
 
             self.state[self.openAttack][attackingCardSuit][attackingCardValue] = 0
             self.state[self.closedAttack][attackingCardSuit][attackingCardValue] = 1
@@ -187,7 +203,7 @@ class Game:
             if sum(sum(suit) for suit in self.state[self.defence]) == 5:
                 # Successful defence!
                 for category in [self.closedAttack, self.defence]:
-                    cards = self._getCards(category)
+                    cards = getCards(self.state, category)
                     for (value, suit) in cards:
                         self.state[category][suit][value] = 0
                         self.state[self.burned][suit][value] = 1
@@ -196,17 +212,19 @@ class Game:
                 newDefender = (player + 1) % self.numberOfPlayers
                 self._updateAttackerAndDefender(newAttacker, newDefender)
                 self._pickUpCards()
+            else:
+                self._updatePlayers()
 
     def concede(self, player, playerState):
         with self.lock:
             latestPlayerState = self._playerState(player)
             if playerState != latestPlayerState:
                 # Player is acting on old information - reject this action.
-                return # latestPlayerState
+                return
 
             print(f'Player {player} concedes...')
             for category in [self.openAttack, self.closedAttack, self.defence]:
-                cards = self._getCards(category)
+                cards = getCards(self.state, category)
                 for (value, suit) in cards:
                     self.state[category][suit][value] = 0
                     self.state[player][suit][value] = 1
@@ -223,9 +241,10 @@ class Game:
                 # Player is acting on old information - reject this action.
                 return # latestPlayerState
 
-            print(f'Player {player} declines...')
+            print(f'Player {player} declines to attack...')
             self.active[player] = False
             if not any(self.active):
+                print(f'Everyone declines to attack...')
                 # If this call has ended the round then we must have a successful defence.
                 defender = self.state[self.defender][0][0]
                 newAttacker = defender
@@ -233,7 +252,7 @@ class Game:
                 self._updateAttackerAndDefender(newAttacker, newDefender)
                 self._pickUpCards()
 
-    # ToDo: do we need a 'no action' action, like:
-    def waitForUpdates(self, player, playerState):
+    def waitForUpdates(self, player, _):
+        # No lock required: players should be able to call this anytime.
         print(f'Player {player} waits for updates...')
         return
