@@ -51,34 +51,30 @@ class Game:
         self.active = [False for _ in range(self.numberOfPlayers)]
         self.inEndgame = False
 
-        self.state = self._initialiseState()
-        self._updatePlayers()
+        self._initialiseState()
 
     def _initialiseState(self):
+        self.state = [[] for _ in range(self.numberOfPlayers + 8)]
+
+        for i in range(self.numberOfPlayers):
+            self.state[i] = constantMatrix(0, 4, 13)
+
         attacker = random.randrange(self.numberOfPlayers)
         defender = (attacker + 1) % self.numberOfPlayers
-        attacker = constantMatrix(attacker, 4, 13)
-        defender = constantMatrix(defender, 4, 13)
+        self.state[self.attacker] = constantMatrix(attacker, 4, 13)
+        self.state[self.defender] = constantMatrix(defender, 4, 13)
 
-        burned = constantMatrix(0, 4, 13)
-        openAttack = constantMatrix(0, 4, 13)
-        closedAttack = constantMatrix(0, 4, 13)
-        defence = constantMatrix(0, 4, 13)
-        trumps = constantMatrix(random.randrange(4), 4, 13)
-        print(f'\nTrumps are {printedSuits[trumps[0][0]]}.\n')
+        self.state[self.openAttack] = constantMatrix(0, 4, 13)
+        self.state[self.closedAttack] = constantMatrix(0, 4, 13)
+        self.state[self.defence] = constantMatrix(0, 4, 13)
 
-        pack, playerCards = self._dealCards()
+        self.state[self.trumps] = constantMatrix(random.randrange(4), 4, 13)
+        self.state[self.burned] = constantMatrix(0, 4, 13)
+        self.state[self.pack] = constantMatrix(1, 4, 13)
 
-        return playerCards + [
-            attacker,
-            defender,
-            openAttack,
-            closedAttack,
-            defence,
-            trumps,
-            burned,
-            pack,
-        ]
+        print(f'\nTrumps are {printedSuits[self.state[self.trumps][0][0]]}.\n')
+        self._pickUpCards()
+
 
     def _dealCards(self):
         pack = constantMatrix(1, 4, 13)
