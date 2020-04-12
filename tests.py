@@ -1,3 +1,3 @@
-xs = []
-xs[0] = True
-print(xs)
+import random
+
+random.shuffle([])
