@@ -16,6 +16,20 @@ def printState(state):
     print('\n\n'.join(result) + '\n')
 
 
+def toString(card):
+    suits = ['S', 'C', 'H', 'D']
+    return f'{card[0]} {suits[card[1]]}'
+
+
+def getCards(state, category):
+    return [
+        (value, suit)
+        for suit in range(4)
+        for value in range(13)
+        if state[category][suit][value] == 1
+    ]
+
+
 class Game:
     def __init__(self, numberOfPlayers, minCards):
         self.numberOfPlayers = numberOfPlayers
@@ -98,16 +112,7 @@ class Game:
         ]
         return [self.state[i] for i in components]
 
-    def _getCards(self, category):
-        return [
-            (value, suit)
-            for suit in range(4)
-            for value in range(13)
-            if self.state[category][suit][value] == 1
-        ]
-
     def _pickUpCards(self):
-        print('Picking up cards...\n')
         # Previous methods must increment attacker/defender
         pack = self._getCards(self.pack)
         random.shuffle(pack)
@@ -133,7 +138,11 @@ class Game:
         self.state[self.attacker] = constantMatrix(attacker, 4, 13)
         self.state[self.defender] = constantMatrix(defender, 4, 13)
 
+    # Public methods: synchronisation needs to be considered!
+
     def getState(self, player):
+        # No lock required: players should be able to call this anytime.
+        # Will block until there is an update of the game state.
         return self.toPlayers[player].receive()
 
     def joinAttack(self, player, attackingCard, defendingCard):
@@ -144,16 +153,56 @@ class Game:
         with self.lock:
             pass
 
-    def defend(self, player, defendingCard, attackingCard):
+    def bounce(self, player, playerState, bounceCard):
+        with self.lock:
+            latestPlayerState = self._playerState(player)
+            if playerState != latestPlayerState:
+                # Player is acting on old information - reject this action.
+                return # latestPlayerState
+
+    def defend(self, player, playerState, defendingCard, attackingCard):
         # If successful, this ends the turn, new cards need to be dealt
         with self.lock:
-            pass
+            latestPlayerState = self._playerState(player)
+            if playerState != latestPlayerState:
+                # Player is acting on old information - reject this action.
+                return # latestPlayerState
+
+            print(f'Player {player} defends {toString(attackingCard)} with {toString(defendingCard)}...')
+            (attackingCardValue, attackingCardSuit) = attackingCard
+            (defendingCardValue, defendingCardSuit) = defendingCard
+
+            # ToDo: shouldn't need these in future:
+            assert self.state[self.openAttack][attackingCardSuit][attackingCardValue] == 1
+            assert self.state[player][defendingCardSuit][defendingCardValue] == 1
+            assert defendingCardValue > attackingCardValue
+
+            self.state[self.openAttack][attackingCardSuit][attackingCardValue] = 0
+            self.state[self.closedAttack][attackingCardSuit][attackingCardValue] = 1
+            self.state[player][defendingCardSuit][defendingCardValue] = 0
+            self.state[self.defence][defendingCardSuit][defendingCardValue] = 1
+
+            self.active[player] = False
+
+            if sum(sum(suit) for suit in self.state[self.defence]) == 5:
+                # Successful defence!
+                for category in [self.closedAttack, self.defence]:
+                    cards = self._getCards(category)
+                    for (value, suit) in cards:
+                        self.state[category][suit][value] = 0
+                        self.state[self.burned][suit][value] = 1
+
+                newAttacker = player
+                newDefender = (player + 1) % self.numberOfPlayers
+                self._updateAttackerAndDefender(newAttacker, newDefender)
+                self._pickUpCards()
 
     def concede(self, player, playerState):
         with self.lock:
-            if playerState != self._playerState(player):
+            latestPlayerState = self._playerState(player)
+            if playerState != latestPlayerState:
                 # Player is acting on old information - reject this action.
-                return
+                return # latestPlayerState
 
             print(f'Player {player} concedes...')
             for category in [self.openAttack, self.closedAttack, self.defence]:
@@ -167,11 +216,12 @@ class Game:
             self._updateAttackerAndDefender(newAttacker, newDefender)
             self._pickUpCards()
 
-    def decline(self, player, playerState):
+    def declineToAttack(self, player, playerState):
         with self.lock:
-            if playerState != self._playerState(player):
+            latestPlayerState = self._playerState(player)
+            if playerState != latestPlayerState:
                 # Player is acting on old information - reject this action.
-                return
+                return # latestPlayerState
 
             print(f'Player {player} declines...')
             self.active[player] = False
@@ -182,3 +232,8 @@ class Game:
                 newDefender = (defender + 1) % self.numberOfPlayers
                 self._updateAttackerAndDefender(newAttacker, newDefender)
                 self._pickUpCards()
+
+    # ToDo: do we need a 'no action' action, like:
+    def waitForUpdates(self, player, playerState):
+        print(f'Player {player} waits for updates...')
+        return
