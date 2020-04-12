@@ -1,5 +1,6 @@
 import random
 import threading
+import time
 
 from communication import OverwritableSlot
 
@@ -24,18 +25,22 @@ class Game:
         self.lock = threading.Lock()
         self.toPlayers = [OverwritableSlot() for _ in range(numberOfPlayers)]
 
-        self.attacker = numberOfPlayers + 0
-        self.defender = numberOfPlayers + 1
-        self.openAttack = numberOfPlayers + 2
-        self.closedAttack = numberOfPlayers + 3
-        self.defence = numberOfPlayers + 4
-        self.trumps = numberOfPlayers + 5
-        self.burned = numberOfPlayers + 6
+        self.attacker = self.numberOfPlayers + 0
+        self.defender = self.numberOfPlayers + 1
+        self.openAttack = self.numberOfPlayers + 2
+        self.closedAttack = self.numberOfPlayers + 3
+        self.defence = self.numberOfPlayers + 4
+        self.trumps = self.numberOfPlayers + 5
+        self.burned = self.numberOfPlayers + 6
+        self.pack = self.numberOfPlayers + 7
 
-        self.state = None
-        self.updateState(self.__initialiseState__())
+        self.active = [False for _ in range(self.numberOfPlayers)]
+        self.inEndgame = False
 
-    def __initialiseState__(self):
+        self.state = self._initialiseState()
+        self._updatePlayers()
+
+    def _initialiseState(self):
         attacker = random.randrange(self.numberOfPlayers)
         defender = (attacker + 1) % self.numberOfPlayers
         attacker = constantMatrix(attacker, 4, 13)
@@ -47,7 +52,7 @@ class Game:
         defence = constantMatrix(0, 4, 13)
         trumps = constantMatrix(random.randrange(4), 4, 13)
 
-        pack, playerCards = self.__dealCards__()
+        pack, playerCards = self._dealCards()
 
         return playerCards + [
             attacker,
@@ -60,7 +65,7 @@ class Game:
             pack,
         ]
 
-    def __dealCards__(self):
+    def _dealCards(self):
         pack = constantMatrix(1, 4, 13)
         playerCards = [[[0 for _ in range(13)] for _ in range(4)] for _ in range(self.numberOfPlayers)]
         cards = [(value, suit) for value in range(13) for suit in range(4)]
@@ -74,15 +79,14 @@ class Game:
 
         return pack, playerCards
 
-    def updateState(self, newState):
-        self.state = newState
+    def _updatePlayers(self):
+        print(f'\nGame state:\n')
+        printState(self.state)
         for i in range(self.numberOfPlayers):
-            self.toPlayers[i].send(self.__playerState__(i))
+            self.active[i] = True
+            self.toPlayers[i].send(self._playerState(i))
 
-    def getState(self, player):
-        return self.toPlayers[player].receive()
-
-    def __playerState__(self, player):
+    def _playerState(self, player):
         components = [
             player,
             self.attacker,
@@ -95,6 +99,40 @@ class Game:
         ]
         return [self.state[i] for i in components]
 
+    def _pickUpCards(self):
+        print("Picking up cards...")
+        # Previous methods must increment attacker/defender
+        pack = [
+            (value, suit)
+            for suit in range(4)
+            for value in range(13)
+            if self.state[self.pack][suit][value] == 1
+        ]
+        random.shuffle(pack)
+
+        # Defender picks up first, then attacker, then others.
+        defender = self.state[self.defender][0][0]
+        for i in range(self.numberOfPlayers):
+            player = (defender - i) % self.numberOfPlayers
+            playerCards = sum([sum(suit) for suit in self.state[player]])
+            if playerCards < self.minCards:
+                newCards = pack[:self.minCards - playerCards]
+                pack = pack[self.minCards - playerCards:]
+                for (value, suit) in newCards:
+                    self.state[self.pack][suit][value] = 0
+                    self.state[player][suit][value] = 1
+
+        if len(pack) == 0:
+            self.inEndgame = True
+
+        self._updatePlayers()
+
+    def getState(self, player):
+        return self.toPlayers[player].receive()
+
+    # ToDo: when players call an action below, perhaps have them send what they believe to be the state too?
+    # If the state is stale, reject their action, so that they aren't acting on ou-of-date knowledge?
+
     def joinAttack(self, player, attackingCard, defendingCard):
         with self.lock:
             pass
@@ -104,18 +142,26 @@ class Game:
             pass
 
     def defend(self, player, defendingCard, attackingCard):
+        # If successful, this ends the turn, new cards need to be dealt
         with self.lock:
             pass
 
     def concede(self, player):
+        # Terminal action - ends the turn, new cards need to be dealt
         with self.lock:
             pass
 
     def decline(self, player):
         with self.lock:
-            pass
-
-
+            self.active[player] = False
+            if not any(self.active):
+                # If this call has ended the round then we must have a successful defence.
+                defender = self.state[self.defender][0][0]
+                newAttacker = defender
+                newDefender = (defender + 1) % self.numberOfPlayers
+                self.state[self.attacker] = constantMatrix(newAttacker, 4, 13)
+                self.state[self.defender] = constantMatrix(newDefender, 4, 13)
+                self._pickUpCards()
 
 
 class Player:
@@ -136,6 +182,7 @@ class Player:
         while self.hasCards(state):
             action = random.choice(self.getPossibleActions(state))
             action()
+            time.sleep(random.uniform(0, 1))
             state = self.game.getState(self.name)
 
     def hasCards(self, state):
@@ -143,6 +190,7 @@ class Player:
 
     def getPossibleActions(self, state):
         # For now, don't make any actual moves.
+        # Must only use the state to determine actions, nothing else.
         print(f'Player {self.name} declines...')
         return [lambda: self.game.decline(self.name)]
 
@@ -158,5 +206,6 @@ def main():
         thread.start()
     for thread in threads:
         thread.join()
+
 
 main()
