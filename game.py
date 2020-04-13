@@ -56,6 +56,7 @@ class Game:
         self.declinedToAttack = [False for _ in range(self.numberOfPlayers)]
         self.activePlayers = list(range(self.numberOfPlayers))
 
+        self.turns = 0
         self._initialiseState()
 
     def _initialiseState(self):
@@ -141,6 +142,7 @@ class Game:
         newAttacker = defender
         newDefender = self._nextPlayer(defender)
         self._updateAttackerAndDefender(newAttacker, newDefender)
+        self.turns += 1
         self._pickUpCards()
 
     def _nextPlayer(self, player):
@@ -152,15 +154,13 @@ class Game:
     def _endGame(self):
         assert len(self.activePlayers) == 1
         loser = self.activePlayers[0]
-        print(f'Player {loser} loses!')
+        print(f'Player {loser} loses after {self.turns} turns!')
         # Give loser all the cards so they know they've lost.
         for category in [self.openAttacks, self.closedAttacks, self.defences]:
             cards = getCards(self.state, category)
             for (value, suit) in cards:
                 self.state[category][suit][value] = 0
                 self.state[loser][suit][value] = 1
-
-
 
     # Public methods: synchronisation needs to be considered!
 
@@ -278,6 +278,7 @@ class Game:
             newAttacker = self._nextPlayer(player)
             newDefender = self._nextPlayer(newAttacker)
             self._updateAttackerAndDefender(newAttacker, newDefender)
+            self.turns += 1
             self._pickUpCards()
 
     def declineToAttack(self, player, playerState):
