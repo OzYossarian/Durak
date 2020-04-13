@@ -7,6 +7,7 @@ from communication import OverwritableSlot
 printedSuits = ['S', 'C', 'H', 'D']
 printedCards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 
+
 def constantMatrix(value, rows, columns):
     return [[value for _ in range(columns)] for _ in range(rows)]
 
@@ -31,6 +32,8 @@ def getCards(state, category):
         if state[category][suit][value] == 1
     ]
 
+def numberOfCards(state, category):
+    return sum([sum(suit) for suit in state[category]])
 
 class Game:
     def __init__(self, numberOfPlayers, minCards, maxAttacks):
@@ -43,17 +46,15 @@ class Game:
 
         self.attacker = self.numberOfPlayers + 0
         self.defender = self.numberOfPlayers + 1
-        self.openAttack = self.numberOfPlayers + 2
-        self.closedAttack = self.numberOfPlayers + 3
-        self.defence = self.numberOfPlayers + 4
+        self.openAttacks = self.numberOfPlayers + 2
+        self.closedAttacks = self.numberOfPlayers + 3
+        self.defences = self.numberOfPlayers + 4
         self.trumps = self.numberOfPlayers + 5
         self.burned = self.numberOfPlayers + 6
         self.pack = self.numberOfPlayers + 7
 
         self.declinedToAttack = [False for _ in range(self.numberOfPlayers)]
-        # ToDo: we need to use activePlayers rather than range(self.numberOfPlayers)!
-        #  Otherwise it breaks when one player is finished.
-        self.activePlayers = range(self.numberOfPlayers)
+        self.activePlayers = list(range(self.numberOfPlayers))
 
         self._initialiseState()
 
@@ -68,9 +69,9 @@ class Game:
         self.state[self.attacker] = constantMatrix(attacker, 4, 13)
         self.state[self.defender] = constantMatrix(defender, 4, 13)
 
-        self.state[self.openAttack] = constantMatrix(0, 4, 13)
-        self.state[self.closedAttack] = constantMatrix(0, 4, 13)
-        self.state[self.defence] = constantMatrix(0, 4, 13)
+        self.state[self.openAttacks] = constantMatrix(0, 4, 13)
+        self.state[self.closedAttacks] = constantMatrix(0, 4, 13)
+        self.state[self.defences] = constantMatrix(0, 4, 13)
 
         self.state[self.trumps] = constantMatrix(random.randrange(4), 4, 13)
         self.state[self.burned] = constantMatrix(0, 4, 13)
@@ -82,18 +83,18 @@ class Game:
     def _updatePlayers(self):
         print(f'\nGame state:\n')
         printState(self.state)
-        for i in range(self.numberOfPlayers):
-            self.declinedToAttack[i] = False
-            self.toPlayers[i].send(copy.deepcopy(self._playerState(i)))
+        for player in self.activePlayers:
+            self.declinedToAttack[player] = False
+            self.toPlayers[player].send(copy.deepcopy(self._playerState(player)))
 
     def _playerState(self, player):
         components = [
             player,
             self.attacker,
             self.defender,
-            self.openAttack,
-            self.closedAttack,
-            self.defence,
+            self.openAttacks,
+            self.closedAttacks,
+            self.defences,
             self.trumps,
             self.burned
         ]
@@ -106,15 +107,16 @@ class Game:
 
         # Defender picks up first, then attacker, then others.
         defender = self.state[self.defender][0][0]
-        for i in range(self.numberOfPlayers):
-            player = (defender - i) % self.numberOfPlayers
-            playerCards = sum([sum(suit) for suit in self.state[player]])
+        player = defender
+        for _ in range(len(self.activePlayers)):
+            playerCards = numberOfCards(self.state, player)
             if playerCards < self.minCards:
                 newCards = pack[:self.minCards - playerCards]
                 pack = pack[self.minCards - playerCards:]
                 for (value, suit) in newCards:
                     self.state[self.pack][suit][value] = 0
                     self.state[player][suit][value] = 1
+            player = self._previousPlayer(player)
 
         if len(pack) == 0:
             self.inEndgame = True
@@ -126,7 +128,10 @@ class Game:
         self.state[self.defender] = constantMatrix(defender, 4, 13)
 
     def _successfulDefence(self):
-        for category in [self.closedAttack, self.defence]:
+        # Burn closed attacks and defences, but also burn any open attacks -
+        # the defender might just have used their last cards.
+        print(f'Successful defence by player {self.state[self.defender][0][0]}!')
+        for category in [self.openAttacks, self.closedAttacks, self.defences]:
             cards = getCards(self.state, category)
             for (value, suit) in cards:
                 self.state[category][suit][value] = 0
@@ -134,9 +139,28 @@ class Game:
 
         defender = self.state[self.defender][0][0]
         newAttacker = defender
-        newDefender = (defender + 1) % self.numberOfPlayers
+        newDefender = self._nextPlayer(defender)
         self._updateAttackerAndDefender(newAttacker, newDefender)
         self._pickUpCards()
+
+    def _nextPlayer(self, player):
+        return self.activePlayers[(self.activePlayers.index(player) + 1) % len(self.activePlayers)]
+
+    def _previousPlayer(self, player):
+        return self.activePlayers[(self.activePlayers.index(player) - 1) % len(self.activePlayers)]
+
+    def _endGame(self):
+        assert len(self.activePlayers) == 1
+        loser = self.activePlayers[0]
+        print(f'Player {loser} loses!')
+        # Give loser all the cards so they know they've lost.
+        for category in [self.openAttacks, self.closedAttacks, self.defences]:
+            cards = getCards(self.state, category)
+            for (value, suit) in cards:
+                self.state[category][suit][value] = 0
+                self.state[loser][suit][value] = 1
+
+
 
     # Public methods: synchronisation needs to be considered!
 
@@ -154,19 +178,14 @@ class Game:
 
             print(f'Player {player} joins attacks: attacks with {toString(card)}...')
             # Check a card of this value appears on the table already somewhere.
-            attackCards = getCards(self.state, self.openAttack) + getCards(self.state, self.closedAttack)
-            cardsOnTable = attackCards + getCards(self.state, self.defence)
+            attackCards = getCards(self.state, self.openAttacks) + getCards(self.state, self.closedAttacks)
+            cardsOnTable = attackCards + getCards(self.state, self.defences)
             assert any(value == card[0] for (value, suit) in cardsOnTable)
             assert self.state[player][card[1]][card[0]] == 1
-            # try:
             assert len(attackCards) < self.maxAttacks
-            # except AssertionError:
-            #     print(f'\nPlayer {player} had belief state:')
-            #     printState(playerState)
-            #     assert len(attackCards) < self.maxAttacks
 
             self.state[player][card[1]][card[0]] = 0
-            self.state[self.openAttack][card[1]][card[0]] = 1
+            self.state[self.openAttacks][card[1]][card[0]] = 1
 
             self._updatePlayers()
 
@@ -184,7 +203,7 @@ class Game:
 
             for (value, suit) in cards:
                 self.state[player][suit][value] = 0
-                self.state[self.openAttack][suit][value] = 1
+                self.state[self.openAttacks][suit][value] = 1
 
             self._updatePlayers()
 
@@ -207,24 +226,24 @@ class Game:
             (defendingCardValue, defendingCardSuit) = defendingCard
 
             # ToDo: shouldn't need these in future:
-            assert self.state[self.openAttack][attackingCardSuit][attackingCardValue] == 1
+            assert self.state[self.openAttacks][attackingCardSuit][attackingCardValue] == 1
             assert self.state[player][defendingCardSuit][defendingCardValue] == 1
             assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) or \
-                defendingCardSuit == self.state[self.trumps][0][0]
+                   defendingCardSuit == self.state[self.trumps][0][0]
 
-            self.state[self.openAttack][attackingCardSuit][attackingCardValue] = 0
-            self.state[self.closedAttack][attackingCardSuit][attackingCardValue] = 1
+            self.state[self.openAttacks][attackingCardSuit][attackingCardValue] = 0
+            self.state[self.closedAttacks][attackingCardSuit][attackingCardValue] = 1
             self.state[player][defendingCardSuit][defendingCardValue] = 0
-            self.state[self.defence][defendingCardSuit][defendingCardValue] = 1
+            self.state[self.defences][defendingCardSuit][defendingCardValue] = 1
 
             self.declinedToAttack[player] = False
 
-            if sum(sum(suit) for suit in self.state[self.defence]) == self.maxAttacks:
+            if numberOfCards(self.state, self.defences) == self.maxAttacks or numberOfCards(self.state, player) == 0:
                 self._successfulDefence()
             else:
                 self._updatePlayers()
 
-    def concede(self, player, playerState):
+    def concede(self, player, playerState, attacksToConcede):
         with self.lock:
             latestPlayerState = self._playerState(player)
             if playerState != latestPlayerState:
@@ -232,14 +251,32 @@ class Game:
                 return
 
             print(f'Player {player} concedes...')
-            for category in [self.openAttack, self.closedAttack, self.defence]:
+            for (value, suit) in attacksToConcede:
+                numberOfOpenAttacks = numberOfCards(self.state, self.openAttacks)
+                surplus = numberOfOpenAttacks - numberOfCards(self.state, player)
+                assert surplus <= 0 and len(attacksToConcede) == numberOfOpenAttacks \
+                       or 0 < surplus == len(attacksToConcede)
+                assert self.state[self.openAttacks][suit][value] == 1
+
+            # Concede all the defences and closed attacks
+            for category in [self.closedAttacks, self.defences]:
                 cards = getCards(self.state, category)
                 for (value, suit) in cards:
                     self.state[category][suit][value] = 0
                     self.state[player][suit][value] = 1
 
-            newAttacker = (player + 1) % self.numberOfPlayers
-            newDefender = (newAttacker + 1) % self.numberOfPlayers
+            # Concede the selected open attacks cards
+            for (value, suit) in attacksToConcede:
+                self.state[self.openAttacks][suit][value] = 0
+                self.state[player][suit][value] = 1
+
+            # Burn any leftover open attacks
+            for (value, suit) in getCards(self.state, self.openAttacks):
+                self.state[self.openAttacks][suit][value] = 0
+                self.state[self.burned][suit][value] = 1
+
+            newAttacker = self._nextPlayer(player)
+            newDefender = self._nextPlayer(newAttacker)
             self._updateAttackerAndDefender(newAttacker, newDefender)
             self._pickUpCards()
 
@@ -252,9 +289,10 @@ class Game:
 
             print(f'Player {player} declines to attack...')
             self.declinedToAttack[player] = True
-            decliners = len([() for declined in self.declinedToAttack if declined])
-            everyoneDeclined = decliners == self.numberOfPlayers - 1 - self.finished
-            if len(getCards(self.state, self.openAttack)) == 0 and everyoneDeclined:
+
+            decliners = [self.declinedToAttack[player] for player in self.activePlayers]
+            everyoneDeclined = len([() for declined in decliners if declined]) == len(self.activePlayers) - 1
+            if len(getCards(self.state, self.openAttacks)) == 0 and everyoneDeclined:
                 print(f'Everyone declines to attack...')
                 # If this call has ended the round then we must have a successful defence.
                 self._successfulDefence()
@@ -265,4 +303,12 @@ class Game:
 
     def done(self, player, _):
         with self.lock:
-            self.finished += 1
+            print(f'Player {player} is out!')
+            if player == self.state[self.attacker][0][0]:
+                newAttacker = self._nextPlayer(player)
+                newDefender = self._nextPlayer(newAttacker)
+                self._updateAttackerAndDefender(newAttacker, newDefender)
+            self.activePlayers.remove(player)
+            if len(self.activePlayers) == 1:
+                self._endGame()
+            self._updatePlayers()
