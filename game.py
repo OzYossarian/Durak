@@ -124,9 +124,10 @@ class Game:
 
         self._updatePlayers()
 
-    def _updateAttackerAndDefender(self, attacker, defender):
-        self.state[self.attacker] = constantMatrix(attacker, 4, 13)
-        self.state[self.defender] = constantMatrix(defender, 4, 13)
+    def _updateAttackerAndDefender(self, newAttacker):
+        newDefender = self._nextPlayer(newAttacker)
+        self.state[self.attacker] = constantMatrix(newAttacker, 4, 13)
+        self.state[self.defender] = constantMatrix(newDefender, 4, 13)
 
     def _successfulDefence(self):
         # Burn closed attacks and defences, but also burn any open attacks -
@@ -139,9 +140,7 @@ class Game:
                 self.state[self.burned][suit][value] = 1
 
         defender = self.state[self.defender][0][0]
-        newAttacker = defender
-        newDefender = self._nextPlayer(defender)
-        self._updateAttackerAndDefender(newAttacker, newDefender)
+        self._updateAttackerAndDefender(defender)
         self.turns += 1
         self._pickUpCards()
 
@@ -207,12 +206,30 @@ class Game:
 
             self._updatePlayers()
 
-    def bounce(self, player, playerState, card):
+    def bounce(self, player, playerState, cards):
         with self.lock:
             latestPlayerState = self._playerState(player)
             if playerState != latestPlayerState:
-                print(f'Player {player} bouncing on old information - reject this action.')
+                print(f'Player {player} bouncing based on old information - reject this action.')
                 return
+
+            print(f'Player {player} bounces with {", ".join([toString(card) for card in cards])}...')
+            # Check there are only open attacks
+            # Check all open attacks have same value
+            # Check these cards have that value too
+            assert player == self.state[self.defender][0][0]
+            assert numberOfCards(self.state, self.closedAttacks) + numberOfCards(self.state, self.defences) == 0
+            attackValues = set(value for (value, suit) in getCards(self.state, self.openAttacks))
+            assert len(attackValues) == 1
+            attackValue = attackValues.pop()
+            assert all(card[0] == attackValue for card in cards)
+
+            for (value, suit) in cards:
+                self.state[self.openAttacks][suit][value] = 1
+                self.state[player][suit][value] = 0
+
+            self._updateAttackerAndDefender(player)
+            self._updatePlayers()
 
     def defend(self, player, playerState, defendingCard, attackingCard):
         with self.lock:
@@ -275,9 +292,7 @@ class Game:
                 self.state[self.openAttacks][suit][value] = 0
                 self.state[self.burned][suit][value] = 1
 
-            newAttacker = self._nextPlayer(player)
-            newDefender = self._nextPlayer(newAttacker)
-            self._updateAttackerAndDefender(newAttacker, newDefender)
+            self._updateAttackerAndDefender(self._nextPlayer(player))
             self.turns += 1
             self._pickUpCards()
 
@@ -306,9 +321,7 @@ class Game:
         with self.lock:
             print(f'Player {player} is out!')
             if player == self.state[self.attacker][0][0]:
-                newAttacker = self._nextPlayer(player)
-                newDefender = self._nextPlayer(newAttacker)
-                self._updateAttackerAndDefender(newAttacker, newDefender)
+                self._updateAttackerAndDefender(self._nextPlayer(player))
             self.activePlayers.remove(player)
             if len(self.activePlayers) == 1:
                 self._endGame()

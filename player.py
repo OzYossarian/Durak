@@ -6,7 +6,9 @@ from itertools import combinations
 from game import getCards
 
 
-def allSublists(xs, maxSize):
+def allSublists(xs, maxSize=None):
+    if maxSize is None:
+        maxSize = len(xs)
     return [list(ys) for i in range(1, maxSize + 1) for ys in combinations(xs, i)]
 
 
@@ -40,7 +42,6 @@ class Player:
     def hasLost(self, state):
         return sum([sum(suit) for suit in state[0]]) + sum([sum(suit) for suit in state[self.burned]]) == 52
 
-
     def getPossibleActions(self, state):
         # Must only use the state to determine actions, nothing else.
         actions = []
@@ -54,14 +55,24 @@ class Player:
             if len(openAttacks) == 0:
                 return [partial(self.game.waitForUpdates, self.name, state)]
 
-            # Must either defend or concede
-            # If there are more open attacks than we have cards, then only pick up as many as we have cards
+            if len(closedAttacks) + len(defences) == 0:
+                # Can possibly bounce.
+                attackValue = openAttacks[0][0]
+                bounceCards = [(value, suit) for (value, suit) in cards if value == attackValue]
+                bounces = allSublists(bounceCards)
+                for bounce in bounces:
+                    actions.append(partial(self.game.bounce, self.name, state, bounce))
+
+            # Can always concede.
+            # If there are more open attacks than we have cards, then only pick up as many as we have cards.
             surplusAttacks = len(openAttacks) - len(cards)
             if surplusAttacks > 0:
                 for attacks in combinations(openAttacks, surplusAttacks):
                     actions.append(partial(self.game.concede, self.name, state, list(attacks)))
             else:
                 actions.append(partial(self.game.concede, self.name, state, openAttacks))
+
+            # Can possibly defend
             for attack in openAttacks:
                 for card in cards:
                     if self.canDefend(attack, card, state):
@@ -71,7 +82,7 @@ class Player:
             # Can attack with multiple cards of the same value
             for v in range(13):
                 vCards = [(value, suit) for (value, suit) in cards if value == v]
-                attacks = allSublists(vCards, len(vCards))
+                attacks = allSublists(vCards)
                 [actions.append(partial(self.game.attack, self.name, state, attack)) for attack in attacks]
 
         # Can only attack if defender has elected to defend and there are fewer than five attacks already.
