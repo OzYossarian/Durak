@@ -244,7 +244,6 @@ class Game:
             (attackingCardValue, attackingCardSuit) = attackingCard
             (defendingCardValue, defendingCardSuit) = defendingCard
 
-            # ToDo: shouldn't need these in future:
             assert self.state[self.openAttacks][attackingCardSuit][attackingCardValue] == 1
             assert self.state[player][defendingCardSuit][defendingCardValue] == 1
             assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) or \
