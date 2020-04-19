@@ -44,14 +44,16 @@ class Game:
         self.lock = threading.Lock()
         self.toPlayers = [OverwritableSlot() for _ in range(numberOfPlayers)]
 
-        self.attacker = self.numberOfPlayers + 0
-        self.defender = self.numberOfPlayers + 1
-        self.openAttacks = self.numberOfPlayers + 2
-        self.closedAttacks = self.numberOfPlayers + 3
-        self.defences = self.numberOfPlayers + 4
-        self.trumps = self.numberOfPlayers + 5
-        self.burned = self.numberOfPlayers + 6
-        self.pack = self.numberOfPlayers + 7
+        # ToDo - change representation of trumps! Set 1's in the row representing trump suit.
+        self.openAttacks = self.numberOfPlayers + 0
+        self.closedAttacks = self.numberOfPlayers + 1
+        self.defences = self.numberOfPlayers + 2
+        self.trumps = self.numberOfPlayers + 3
+        self.burned = self.numberOfPlayers + 4
+        self.pack = self.numberOfPlayers + 5
+
+        self.attacker = None
+        self.defender = None
 
         self.declinedToAttack = [False for _ in range(self.numberOfPlayers)]
         self.activePlayers = list(range(self.numberOfPlayers))
@@ -60,15 +62,10 @@ class Game:
         self._initialiseState()
 
     def _initialiseState(self):
-        self.state = [[] for _ in range(self.numberOfPlayers + 8)]
+        self.state = [[] for _ in range(self.numberOfPlayers + 6)]
 
         for i in range(self.numberOfPlayers):
             self.state[i] = constantMatrix(0, 4, 13)
-
-        attacker = random.randrange(self.numberOfPlayers)
-        defender = (attacker + 1) % self.numberOfPlayers
-        self.state[self.attacker] = constantMatrix(attacker, 4, 13)
-        self.state[self.defender] = constantMatrix(defender, 4, 13)
 
         self.state[self.openAttacks] = constantMatrix(0, 4, 13)
         self.state[self.closedAttacks] = constantMatrix(0, 4, 13)
@@ -77,6 +74,9 @@ class Game:
         self.state[self.trumps] = constantMatrix(random.randrange(4), 4, 13)
         self.state[self.burned] = constantMatrix(0, 4, 13)
         self.state[self.pack] = constantMatrix(1, 4, 13)
+
+        self.attacker = random.randrange(self.numberOfPlayers)
+        self.defender = (self.attacker + 1) % self.numberOfPlayers
 
         print(f'\nTrumps are {printedSuits[self.state[self.trumps][0][0]]}.')
         self._pickUpCards()
@@ -89,17 +89,21 @@ class Game:
             self.toPlayers[player].send(copy.deepcopy(self._playerState(player)))
 
     def _playerState(self, player):
+        # Attacker and defender should be relative to this player.
+        attacker = (self.attacker - player) % self.numberOfPlayers
+        defender = (self.defender - player) % self.numberOfPlayers
+        attacker = constantMatrix(attacker, 4, 13)
+        defender = constantMatrix(defender, 4, 13)
+
         components = [
             player,
-            self.attacker,
-            self.defender,
             self.openAttacks,
             self.closedAttacks,
             self.defences,
             self.trumps,
             self.burned
         ]
-        return [self.state[i] for i in components]
+        return [self.state[i] for i in components] + [attacker, defender]
 
     def _pickUpCards(self):
         # Previous methods must increment attacker/defender
@@ -107,8 +111,7 @@ class Game:
         random.shuffle(pack)
 
         # Defender picks up first, then attacker, then others.
-        defender = self.state[self.defender][0][0]
-        player = defender
+        player = self.defender
         for _ in range(len(self.activePlayers)):
             playerCards = numberOfCards(self.state, player)
             if playerCards < self.minCards:
@@ -126,21 +129,20 @@ class Game:
 
     def _updateAttackerAndDefender(self, newAttacker):
         newDefender = self._nextPlayer(newAttacker)
-        self.state[self.attacker] = constantMatrix(newAttacker, 4, 13)
-        self.state[self.defender] = constantMatrix(newDefender, 4, 13)
+        self.attacker = newAttacker
+        self.defender = newDefender
 
     def _successfulDefence(self):
         # Burn closed attacks and defences, but also burn any open attacks -
         # the defender might just have used their last cards.
-        print(f'Successful defence by player {self.state[self.defender][0][0]}!')
+        print(f'Successful defence by player {self.defender}!')
         for category in [self.openAttacks, self.closedAttacks, self.defences]:
             cards = getCards(self.state, category)
             for (value, suit) in cards:
                 self.state[category][suit][value] = 0
                 self.state[self.burned][suit][value] = 1
 
-        defender = self.state[self.defender][0][0]
-        self._updateAttackerAndDefender(defender)
+        self._updateAttackerAndDefender(self.defender)
         self.turns += 1
         self._pickUpCards()
 
@@ -217,7 +219,7 @@ class Game:
             # Check there are only open attacks
             # Check all open attacks have same value
             # Check these cards have that value too
-            assert player == self.state[self.defender][0][0]
+            assert player == self.defender
             assert numberOfCards(self.state, self.closedAttacks) + numberOfCards(self.state, self.defences) == 0
             attackValues = set(value for (value, suit) in getCards(self.state, self.openAttacks))
             assert len(attackValues) == 1
@@ -320,7 +322,7 @@ class Game:
     def done(self, player, _):
         with self.lock:
             print(f'Player {player} is out!')
-            if player == self.state[self.attacker][0][0]:
+            if player == self.attacker:
                 self._updateAttackerAndDefender(self._nextPlayer(player))
             self.activePlayers.remove(player)
             if len(self.activePlayers) == 1:

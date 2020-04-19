@@ -14,16 +14,19 @@ def allSublists(xs, maxSize=None):
 
 class Player:
     def __init__(self, name, game):
+        # Players should all believe that they are player 0, although they will have a 'true' name too.
+        # The indices of the attacker and defender will then be relative to this player.
         self.name = name
         self.game = game
 
-        self.attacker = 1
-        self.defender = 2
-        self.openAttacks = 3
-        self.closedAttacks = 4
-        self.defences = 5
-        self.trumps = 6
-        self.burned = 7
+        self.openAttacks = 1
+        self.closedAttacks = 2
+        self.defences = 3
+        self.trumps = 4
+        self.burned = 5
+
+        self.attacker = 6
+        self.defender = 7
 
     def play(self):
         state = self.game.getState(self.name)
@@ -100,10 +103,10 @@ class Player:
         return actions
 
     def isDefender(self, state):
-        return state[self.defender][0][0] == self.name
+        return state[self.defender][0][0] == 0
 
     def isAttacker(self, state):
-        return state[self.attacker][0][0] == self.name
+        return state[self.attacker][0][0] == 0
 
     def canDefend(self, attack, card, state):
         (attackValue, attackSuit) = attack
