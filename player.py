@@ -19,10 +19,10 @@ class Player:
         self.name = name
         self.game = game
 
-        self.openAttacks = 1
-        self.closedAttacks = 2
-        self.defences = 3
-        self.trumps = 4
+        self.trumps = 1
+        self.openAttacks = 2
+        self.closedAttacks = 3
+        self.defences = 4
         self.burned = 5
 
         self.attacker = 6
@@ -114,4 +114,4 @@ class Player:
         if suit == attackSuit:
             return value > attackValue
         else:
-            return suit == state[self.trumps][0][0]
+            return state[self.trumps][suit][0] == 1

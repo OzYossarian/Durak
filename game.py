@@ -44,11 +44,10 @@ class Game:
         self.lock = threading.Lock()
         self.toPlayers = [OverwritableSlot() for _ in range(numberOfPlayers)]
 
-        # ToDo - change representation of trumps! Set 1's in the row representing trump suit.
-        self.openAttacks = self.numberOfPlayers + 0
-        self.closedAttacks = self.numberOfPlayers + 1
-        self.defences = self.numberOfPlayers + 2
-        self.trumps = self.numberOfPlayers + 3
+        self.trumps = self.numberOfPlayers + 0
+        self.openAttacks = self.numberOfPlayers + 1
+        self.closedAttacks = self.numberOfPlayers + 2
+        self.defences = self.numberOfPlayers + 3
         self.burned = self.numberOfPlayers + 4
         self.pack = self.numberOfPlayers + 5
 
@@ -71,14 +70,15 @@ class Game:
         self.state[self.closedAttacks] = constantMatrix(0, 4, 13)
         self.state[self.defences] = constantMatrix(0, 4, 13)
 
-        self.state[self.trumps] = constantMatrix(random.randrange(4), 4, 13)
+        trumps = random.randrange(4)
+        self.state[self.trumps] = [[1 if suit == trumps else 0 for _ in range(13)] for suit in range(4)]
         self.state[self.burned] = constantMatrix(0, 4, 13)
         self.state[self.pack] = constantMatrix(1, 4, 13)
 
         self.attacker = random.randrange(self.numberOfPlayers)
         self.defender = (self.attacker + 1) % self.numberOfPlayers
 
-        print(f'\nTrumps are {printedSuits[self.state[self.trumps][0][0]]}.')
+        print(f'\nTrumps are {printedSuits[trumps]}.')
         self._pickUpCards()
 
     def _updatePlayers(self):
@@ -97,10 +97,10 @@ class Game:
 
         components = [
             player,
+            self.trumps,
             self.openAttacks,
             self.closedAttacks,
             self.defences,
-            self.trumps,
             self.burned
         ]
         return [self.state[i] for i in components] + [attacker, defender]
@@ -248,7 +248,7 @@ class Game:
             assert self.state[self.openAttacks][attackingCardSuit][attackingCardValue] == 1
             assert self.state[player][defendingCardSuit][defendingCardValue] == 1
             assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) or \
-                   defendingCardSuit == self.state[self.trumps][0][0]
+                   self.state[self.trumps][defendingCardSuit][0] == 1
 
             self.state[self.openAttacks][attackingCardSuit][attackingCardValue] = 0
             self.state[self.closedAttacks][attackingCardSuit][attackingCardValue] = 1
