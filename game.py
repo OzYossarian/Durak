@@ -92,8 +92,8 @@ class Game:
         # Attacker and defender should be relative to this player.
         attacker = (self.attacker - player) % self.numberOfPlayers
         defender = (self.defender - player) % self.numberOfPlayers
-        attacker = numpy.full((4, 13), attacker)
-        defender = numpy.full((4, 13), defender)
+        attacker = numpy.full((4, 13), attacker, dtype=int)
+        defender = numpy.full((4, 13), defender, dtype=int)
 
         observable = [player, self.trumps, self.openAttacks, self.closedAttacks, self.defences, self.burned]
         return numpy.append(self.state[observable], [attacker, defender], axis=0)
@@ -112,8 +112,8 @@ class Game:
                     shortage = self.minCards - playerCards
                     newCards = tuple(pack[:, :shortage])
                     pack = pack[:, shortage:]
-                    self.state[self.pack][newCards] = numpy.zeros(shortage, dtype=int)
-                    self.state[player][newCards] = numpy.ones(shortage, dtype=int)
+                    self.state[self.pack][newCards] = numpy.zeros(length(newCards), dtype=int)
+                    self.state[player][newCards] = numpy.ones(length(newCards), dtype=int)
                 player = self._previousPlayer(player)
 
         self._updatePlayers()

@@ -38,7 +38,7 @@ class Player:
             actions = self.getPossibleActions(state)
             action = random.choice(actions)
             action()
-            # time.sleep(random.uniform(0, 2))
+            # time.sleep(random.uniform(3, 5))
             state = self.game.getState(self.name)
         if not self.hasLost(state):
             self.game.done(self.name, None)
