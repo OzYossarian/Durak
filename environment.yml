@@ -1,3 +1,4 @@
 name: Durak
 dependencies:
   - tensorflow=2.0
+  - numpy
