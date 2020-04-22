@@ -15,11 +15,13 @@ def allSublists(xs, maxSize=None):
 
 
 class Player:
-    def __init__(self, name, game):
+    def __init__(self, name, game, barrier):
         # Players should all believe that they are player 0, although they will have a 'true' name too.
         # The indices of the attacker and defender will then be relative to this player.
         self.name = name
         self.game = game
+        self.barrier = barrier
+        self.waits = 0
 
         # ToDo: player should hold and update beliefs about other players' cards.
         self.cards = 0
@@ -33,15 +35,29 @@ class Player:
         self.defender = 7
 
     def play(self):
+        # Wait until it's our first turn:
+        [self.wait() for _ in range(self.name)]
         state = self.game.getState(self.name)
+
         while self.hasCards(state) and not self.hasLost(state):
-            actions = self.getPossibleActions(state)
-            action = random.choice(actions)
-            action()
-            # time.sleep(random.uniform(3, 5))
-            state = self.game.getState(self.name)
+            state = self.takeTurn(state)
+
         if not self.hasLost(state):
-            self.game.done(self.name, None)
+            self.game.done(self.name)
+            while not self.game.gameOver:
+                self.wait()
+
+    def takeTurn(self, state):
+        actions = self.getPossibleActions(state)
+        action = random.choice(actions)
+        action()
+        [self.wait() for _ in range(self.game.numberOfPlayers)]
+        return self.game.getState(self.name)
+
+    def wait(self):
+        self.waits += 1
+        print(f'Player {self.name} barrier waiting ({self.waits})...')
+        self.barrier.wait()
 
     def hasCards(self, state):
         return numberOfCards(state, self.cards) > 0
@@ -59,7 +75,7 @@ class Player:
         if self.isDefender(state):
             if length(openAttacks) == 0:
                 # Can't defend until we've been attacked.
-                return [partial(self.game.waitForUpdates, self.name, state)]
+                return [partial(self.game.waitForUpdates, self.name)]
             actions = []
             if length(closedAttacks) + length(defences) == 0:
                 actions.extend(self.bounceActions(cards, openAttacks, state))
@@ -68,16 +84,16 @@ class Player:
             return actions
 
         elif self.isAttacker(state) and length(openAttacks) + length(closedAttacks) == 0:
-            return self.attackActions(cards, state)
+            return list(self.attackActions(cards, state))
 
         # Can only attack if defender has elected to defend and there are fewer than 'maxAttacks' attacks already.
         elif length(defences) > 0 and length(openAttacks) + length(closedAttacks) < self.game.maxAttacks:
-            actions = [partial(self.game.declineToAttack, self.name, state)]
+            actions = [partial(self.game.declineToAttack, self.name)]
             actions.extend(self.joinAttackActions(cards, closedAttacks, defences, state))
             return actions
 
         else:
-            return [partial(self.game.waitForUpdates, self.name, state)]
+            return [partial(self.game.waitForUpdates, self.name)]
 
     def concedeActions(self, cards, openAttacks, state):
         # If there are more open attacks than we have cards, then only pick up as many as we have cards.
@@ -85,9 +101,9 @@ class Player:
         surplusAttacks = length(openAttacks) - length(cards)
         if surplusAttacks > 0:
             for attacks in combinations(numpy.array(openAttacks).T, surplusAttacks):
-                actions.append(partial(self.game.concede, self.name, state, tuple(numpy.array(attacks).T)))
+                actions.append(partial(self.game.concede, self.name, tuple(numpy.array(attacks).T)))
         else:
-            actions.append(partial(self.game.concede, self.name, state, openAttacks))
+            actions.append(partial(self.game.concede, self.name, openAttacks))
         return actions
 
     def joinAttackActions(self, cards, closedAttacks, defences, state):
@@ -96,7 +112,7 @@ class Player:
         indices = numpy.where(numpy.isin(cards[1], valuesAllowed))[0]
         for i in indices:
             card = (cards[0][i], cards[1][i])
-            yield partial(self.game.joinAttack, self.name, state, card)
+            yield partial(self.game.joinAttack, self.name, card)
 
     def attackActions(self, cards, state):
         # Can attack with multiple cards of the same value
@@ -104,21 +120,21 @@ class Player:
             valueCards = numpy.array(cards).T[numpy.where(cards[1] == value)]
             attacks = allSublists(valueCards)
             for attack in attacks:
-                yield partial(self.game.attack, self.name, state, tuple(attack.T))
+                yield partial(self.game.attack, self.name, tuple(attack.T))
 
     def defendActions(self, cards, openAttacks, state):
         # ToDo: optimise all this switching between numpy arrays and tuples
         for attack in numpy.array(openAttacks).T:
             for card in numpy.array(cards).T:
                 if self.canDefend(attack, card, state):
-                    yield partial(self.game.defend, self.name, state, tuple(card.T), tuple(attack.T))
+                    yield partial(self.game.defend, self.name, tuple(card.T), tuple(attack.T))
 
     def bounceActions(self, cards, openAttacks, state):
         attackValue = openAttacks[1][0]
         bounceCards = numpy.array(cards).T[numpy.where(cards[1] == attackValue)]
         bounces = allSublists(bounceCards)
         for bounce in bounces:
-            yield partial(self.game.bounce, self.name, state, tuple(bounce.T))
+            yield partial(self.game.bounce, self.name, tuple(bounce.T))
 
     def isDefender(self, state):
         return state[self.defender][0][0] == 0

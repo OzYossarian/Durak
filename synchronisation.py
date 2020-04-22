@@ -4,14 +4,14 @@ import threading
 class OverwritableSlot:
     def __init__(self):
         self.value = None
-        self.slotEmpty = MultiReleaseSempahore(down=False)
+        self.mutex = MultiReleaseSempahore(down=False)
         self.slotFull = MultiReleaseSempahore(down=True)
 
     def send(self, value):
-        self.slotEmpty.acquire()
+        self.mutex.acquire()
         self.value = value
         self.slotFull.release()
-        self.slotEmpty.release()
+        self.mutex.release()
 
     def receive(self):
         self.slotFull.acquire()
@@ -35,6 +35,16 @@ class MultiReleaseSempahore():
 
     def acquire(self):
         self.semaphore.acquire()
+
+
+class TerminatingBarrier:
+    def __init__(self, parties):
+        self.parties = parties
+
+    def wait(self, done):
+        return False
+
+
 
 
 
