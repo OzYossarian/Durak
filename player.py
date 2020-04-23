@@ -36,7 +36,7 @@ class Player:
 
     def play(self):
         # Wait until it's our first turn:
-        [self.wait() for _ in range(self.name)]
+        [self.wait(False) for _ in range(self.name)]
         state = self.game.getState(self.name)
 
         while self.hasCards(state) and not self.hasLost(state):
@@ -44,20 +44,22 @@ class Player:
 
         if not self.hasLost(state):
             self.game.done(self.name)
-            while not self.game.gameOver:
-                self.wait()
+
+        gameOver = self.wait(True)
+        while not gameOver:
+            gameOver = self.wait(True)
 
     def takeTurn(self, state):
         actions = self.getPossibleActions(state)
         action = random.choice(actions)
         action()
-        [self.wait() for _ in range(self.game.numberOfPlayers)]
+        [self.wait(False) for _ in range(self.game.numberOfPlayers)]
         return self.game.getState(self.name)
 
-    def wait(self):
+    def wait(self, done):
         self.waits += 1
         print(f'Player {self.name} barrier waiting ({self.waits})...')
-        self.barrier.wait()
+        return self.barrier.wait(done)
 
     def hasCards(self, state):
         return numberOfCards(state, self.cards) > 0

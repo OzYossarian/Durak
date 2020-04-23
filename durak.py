@@ -2,6 +2,7 @@ import threading
 
 from game import Game
 from player import Player
+from synchronisation import AndBarrier
 
 
 def main():
@@ -9,7 +10,7 @@ def main():
     minCards = 6
     maxAttacks = 5
     game = Game(numberOfPlayers, minCards, maxAttacks)
-    barrier = threading.Barrier(numberOfPlayers)
+    barrier = AndBarrier(numberOfPlayers)
     players = [Player(i, game, barrier) for i in range(numberOfPlayers)]
 
     threads = [threading.Thread(target=(lambda p: p.play()), args=(players[i],)) for i in range(numberOfPlayers)]
