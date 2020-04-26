@@ -1,10 +1,7 @@
 import copy
 import random
-import threading
-
+import observables
 import numpy
-
-from synchronisation import OverwritableSlot
 
 printSuit = ['S', 'C', 'H', 'D']
 printValue = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
@@ -12,10 +9,6 @@ printValue = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 
 def length(cards):
     return cards[0].size
-
-
-def constantMatrix(value, rows, columns):
-    return numpy.full((rows, columns), value, dtype=int)
 
 
 def printState(state):
@@ -41,72 +34,57 @@ def numberOfCards(state, category):
 
 
 class Game:
-    def __init__(self, numberOfPlayers, minCards, maxAttacks):
-        self.numberOfPlayers = numberOfPlayers
+    def __init__(self, players, minCards, maxAttacks):
+        self.players = players
+        self.numberOfPlayers = len(players)
         self.minCards = minCards
         self.maxAttacks = maxAttacks
 
-        self.trumps = self.numberOfPlayers + 0
-        self.openAttacks = self.numberOfPlayers + 1
-        self.closedAttacks = self.numberOfPlayers + 2
-        self.defences = self.numberOfPlayers + 3
-        self.burned = self.numberOfPlayers + 4
-        self.pack = self.numberOfPlayers + 5
+        self.openAttacks = self._stateIndex(observables.openAttacks)
+        self.closedAttacks = self._stateIndex(observables.closedAttacks)
+        self.defences = self._stateIndex(observables.defences)
+        self.trumps = self._stateIndex(observables.trumps)
+        self.attacker = self._stateIndex(observables.attacker)
+        self.defender = self._stateIndex(observables.defender)
+        self.burned = self._stateIndex(observables.burned)
+        self.pack = self._stateIndex(observables.pack)
 
-        self.numberOfGlobalComponents = 6
-        self.numberOfActionComponents = 4
-
-        self.attacker = None
-        self.defender = None
-
-        self.declinedToAttack = [False for _ in range(self.numberOfPlayers)]
+        self.declinedToAttack = 0
         self.playersNotOut = list(range(self.numberOfPlayers))
-        self.activePlayer = 0
-        self.gameOver = False
+        self.activePlayer = None
 
         self.turns = 0
         self._initialiseState()
 
+    def play(self):
+        gameOver = False
+        while not gameOver:
+            action = self.players[self.activePlayer].act(self._observation(self.activePlayer))
+            self._updateState(action)
+            gameOver = len(self.playersNotOut) == 1
+
     def _initialiseState(self):
-        self.state = numpy.zeros((self.numberOfPlayers + self.numberOfGlobalComponents, 4, 13), dtype=int)
+        self.state = numpy.zeros((self.numberOfPlayers + 8, 4, 13), dtype=int)
 
         trumps = random.randrange(4)
         self.state[self.trumps][trumps] = numpy.ones(13, dtype=int)
         self.state[self.pack] = numpy.ones((4, 13), dtype=int)
 
-        self.attacker = random.randrange(self.numberOfPlayers)
-        self.defender = (self.attacker + 1) % self.numberOfPlayers
+        attacker = random.randrange(self.numberOfPlayers)
+        defender = (attacker + 1) % self.numberOfPlayers
+        self._setAttacker(attacker)
+        self._setDefender(defender)
+        self.activePlayer = attacker
 
-        print(f'\nTrumps are {printSuit[trumps]}.')
-        self._pickUpCards()
+        self._pickUpCards(self._getDefender())
 
-    def _stateChanged(self):
-        print(f'\nGame state:\n')
-        attacker = numpy.full((4, 13), self.attacker, dtype=int)
-        defender = numpy.full((4, 13), self.defender, dtype=int)
-        printState(numpy.append(self.state, [attacker, defender], axis=0))
-
-        for player in self.playersNotOut:
-            self.declinedToAttack[player] = False
-
-    def _playerState(self, player):
-        # Attacker and defender should be relative to this player.
-        attacker = (self.attacker - player) % self.numberOfPlayers
-        defender = (self.defender - player) % self.numberOfPlayers
-        attacker = numpy.full((4, 13), attacker, dtype=int)
-        defender = numpy.full((4, 13), defender, dtype=int)
-
-        observable = [player, self.trumps, self.openAttacks, self.closedAttacks, self.defences, self.burned]
-        return numpy.append(self.state[observable], [attacker, defender], axis=0)
-
-    def _pickUpCards(self):
-        # Previous methods must increment attacker/defender
+    def _pickUpCards(self, firstToPickUp):
         pack = numpy.array(getCards(self.state, self.pack))
         if pack.shape[1] > 0:
             numpy.random.shuffle(numpy.transpose(pack))
 
             # Defender picks up first, then attacker, then others.
-            player = self.defender
+            player = firstToPickUp
             for _ in range(len(self.playersNotOut)):
                 playerCards = numberOfCards(self.state, player)
                 if playerCards < self.minCards:
@@ -119,23 +97,218 @@ class Game:
 
         self._stateChanged()
 
+    def _stateChanged(self):
+        print(f'\nGame state:\n')
+        printState(self.state)
+        print(f'\nTrumps are {printSuit[self.state[self.trumps][0][0]]}.')
+        print(f'Players {", ".join([str(player) for player in self.playersNotOut])} are still in')
+        print(f'Player {self.activePlayer} is active')
+        print()
+
+        self.declinedToAttack = 0
+
+    def _observation(self, player):
+        # Attacker and defender should be relative to this player.
+        attacker = (self._getAttacker() - player) % self.numberOfPlayers
+        defender = (self._getDefender() - player) % self.numberOfPlayers
+        attacker = numpy.full((4, 13), attacker, dtype=int)
+        defender = numpy.full((4, 13), defender, dtype=int)
+
+        # Order here must match that in observables.py.
+        actionObservation = self.state[[player, self.openAttacks, self.closedAttacks, self.defences]]
+        remainingObservation = self.state[[self.trumps, self.burned]]
+        return numpy.concatenate((actionObservation, [attacker, defender], remainingObservation), axis=0)
+
+    def _updateState(self, action):
+        # ToDo: Once all this works, train on a more efficient version with assertions removed.
+        assert numpy.sum(action) == 0
+        affectedState = self.state[self._actionComponents(self.activePlayer)]
+        assert numpy.all(affectedState[numpy.where(action == 1)] == 0)
+        assert numpy.all(affectedState[numpy.where(action == -1)] == 1)
+
+        if numpy.sum(action[observables.openAttacks]) > 0:
+            attacks = numberOfCards(self.state, self.openAttacks) + numberOfCards(self.state, self.closedAttacks)
+            if self.activePlayer == self._getDefender():
+                self._bounce(action)
+            elif self.activePlayer == self._getAttacker() and attacks == 0:
+                self._attack(action)
+            else:
+                self._joinAttack(action)
+
+        elif numpy.sum(action[observables.defences]) > 0:
+            self._defend(action)
+
+        elif numpy.sum(action[observables.playerCards]) > 0:
+            self._concede(action)
+
+        else:
+            self._declineToAttack(action)
+
+    def _joinAttack(self, action):
+        attackCards = numpy.where(action[observables.openAttacks] == 1)
+        assert length(attackCards) == 1
+        attackCard = (attackCards[0][0], attackCards[1][0])
+        print(f'Player {self.activePlayer} joins attacks: attacks with {printCards(attackCards)}...')
+
+        # Check a card of this value appears on the table already somewhere.
+        openAttacks = getCards(self.state, self.openAttacks)
+        closedAttacks = getCards(self.state, self.closedAttacks)
+        defences = getCards(self.state, self.defences)
+
+        assert any(numpy.any(cards[1] == attackCard[1]) for cards in [closedAttacks, defences])
+        assert self.state[self.activePlayer][attackCard] == 1
+        totalAttacks = length(openAttacks) + length(closedAttacks)
+        assert totalAttacks < self.maxAttacks
+
+        self._updateStateAfterAttack(action)
+
+    def _attack(self, action):
+        attackCards = numpy.where(action[observables.openAttacks] == 1)
+        print(f'Player {self.activePlayer} attacks with {printCards(attackCards)}...')
+
+        # If attacking with multiple cards, check all the values are the same.
+        assert numpy.unique(attackCards[1]).size == 1
+        # Check player actually has these cards.
+        assert numpy.all(self.state[self.activePlayer][attackCards] == 1)
+
+        self._updateStateAfterAttack(action)
+
+    def _bounce(self, action):
+        bounceCards = numpy.where(action[observables.openAttacks] == 1)
+        print(f'Player {self.activePlayer} bounces with {printCards(bounceCards)}...')
+
+        assert self.activePlayer == self._getDefender()
+        # Check there are only open attacks
+        assert numberOfCards(self.state, self.closedAttacks) + numberOfCards(self.state, self.defences) == 0
+        # Check all open attacks have same value
+        attackValues = numpy.unique(getCards(self.state, self.openAttacks)[1])
+        assert attackValues.size == 1
+        # Check these cards have that value too
+        assert numpy.all(bounceCards[1] == attackValues[0])
+
+        self._updateAttackerAndDefender(newAttacker=self.activePlayer)
+        self._updateStateAfterAttack(action)
+
+    def _updateStateAfterAttack(self, action):
+        self._applyAction(action)
+
+        if numpy.sum(self.state[self.activePlayer]) == 0:
+            print(f'Player {self.activePlayer} is out!')
+            # Let the defender handle update of attacker/defender
+            playerOut = self.activePlayer
+            self.activePlayer = self._nextPlayer(playerOut)
+            self.playersNotOut.remove(playerOut)
+        else:
+            self.activePlayer = self._nextPlayer(self.activePlayer)
+
+        self._stateChanged()
+
+    def _defend(self, action):
+        attackingCards = numpy.where(action[observables.openAttacks] == -1)
+        defendingCards = numpy.where(action[observables.defences] == 1)
+        print(f'Player {self.activePlayer} defends {printCards(attackingCards)} with {printCards(defendingCards)}...')
+
+        assert length(attackingCards) == 1
+        assert length(defendingCards) == 1
+
+        (attackingCardSuit, attackingCardValue) = (attackingCards[0][0], attackingCards[1][0])
+        (defendingCardSuit, defendingCardValue) = (defendingCards[0][0], defendingCards[1][0])
+
+        assert self.state[self.openAttacks][attackingCardSuit][attackingCardValue] == 1
+        assert self.state[self.activePlayer][defendingCardSuit][defendingCardValue] == 1
+        assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) \
+               or self.state[self.trumps][defendingCardSuit][0] == 1 and defendingCardSuit != attackingCardSuit
+
+        self._applyAction(action)
+
+        if numberOfCards(self.state, self.activePlayer) == 0:
+            print(f'Player {self.activePlayer} is out!')
+            playerOut = self.activePlayer
+            self.activePlayer = self._nextPlayer(playerOut)
+            firstToPickUp = self._previousPlayer(playerOut)
+            self.playersNotOut.remove(playerOut)
+            self._successfulDefence(self.activePlayer, firstToPickUp)
+
+        elif numberOfCards(self.state, self.defences) == self.maxAttacks:
+            # Active player stays the same - defender becomes attacker
+            self._successfulDefence(newAttacker=self.activePlayer, firstToPickUp=self.activePlayer)
+
+        else:
+            self.activePlayer = self._nextPlayer(self.activePlayer)
+            self._stateChanged()
+
+    def _concede(self, action):
+        print(f'Player {self.activePlayer} concedes...')
+        attacksToConcede = numpy.where(action[observables.openAttacks] == -1)
+
+        numberOfOpenAttacks = numberOfCards(self.state, self.openAttacks)
+        surplus = numberOfOpenAttacks - numberOfCards(self.state, self.activePlayer)
+        assert surplus <= 0 and length(attacksToConcede) == numberOfOpenAttacks \
+            or 0 < surplus == length(attacksToConcede)
+        assert numpy.all(self.state[self.openAttacks][attacksToConcede] == 1)
+
+        self._applyAction(action)
+
+        # Burn any leftover open attacks
+        leftovers = getCards(self.state, self.openAttacks)
+        self.state[self.openAttacks][leftovers] = numpy.zeros(length(leftovers), dtype=int)
+        self.state[self.burned][leftovers] = numpy.ones(length(leftovers), dtype=int)
+
+        newAttacker = self._nextPlayer(self.activePlayer)
+        firstToPickUp = self._previousPlayer(self.activePlayer)
+
+        self._updateAttackerAndDefender(newAttacker)
+        self.turns += 1
+        self.activePlayer = self._nextPlayer(self.activePlayer)
+        self._pickUpCards(firstToPickUp)
+
+    def _declineToAttack(self, action):
+        print(f'Player {self.activePlayer} declines to attack...')
+        assert numpy.all(action == 0)
+        self.declinedToAttack += 1
+
+        everyoneDeclined = self.declinedToAttack == len(self.playersNotOut) - 1
+        if length(getCards(self.state, self.openAttacks)) == 0 and everyoneDeclined:
+            print(f'Everyone declines to attack...')
+            defender = self._getDefender()
+            assert self.activePlayer == self._previousPlayer(defender)
+            # If this call has ended the round then we must have a successful defence.
+            self._successfulDefence(newAttacker=defender, firstToPickUp=defender)
+
+        self.activePlayer = self._nextPlayer(self.activePlayer)
+
     def _updateAttackerAndDefender(self, newAttacker):
         newDefender = self._nextPlayer(newAttacker)
-        self.attacker = newAttacker
-        self.defender = newDefender
+        self._setAttacker(newAttacker)
+        self._setDefender(newDefender)
 
-    def _successfulDefence(self):
+    def _successfulDefence(self, newAttacker, firstToPickUp):
         # Burn closed attacks and defences, but also burn any open attacks -
         # the defender might just have used their last cards.
-        print(f'Successful defence by player {self.defender}!')
+        print(f'Successful defence by player {self._getDefender()}!')
         for category in [self.openAttacks, self.closedAttacks, self.defences]:
             cards = getCards(self.state, category)
             self.state[category][cards] = numpy.zeros(length(cards), dtype=int)
             self.state[self.burned][cards] = numpy.ones(length(cards), dtype=int)
 
-        self._updateAttackerAndDefender(self.defender)
+        self._updateAttackerAndDefender(newAttacker)
         self.turns += 1
-        self._pickUpCards()
+        self._pickUpCards(firstToPickUp)
+
+    def _stateIndex(self, observable):
+        return self.numberOfPlayers - 1 + observable
+
+    def _getAttacker(self):
+        return self.state[self.attacker][0][0]
+
+    def _setAttacker(self, attacker):
+        self.state[self.attacker] = numpy.full((4,13), attacker, dtype=int)
+
+    def _getDefender(self):
+        return self.state[self.defender][0][0]
+
+    def _setDefender(self, defender):
+        self.state[self.defender] = numpy.full((4, 13), defender, dtype=int)
 
     def _nextPlayer(self, player):
         return self.playersNotOut[(self.playersNotOut.index(player) + 1) % len(self.playersNotOut)]
@@ -143,161 +316,9 @@ class Game:
     def _previousPlayer(self, player):
         return self.playersNotOut[(self.playersNotOut.index(player) - 1) % len(self.playersNotOut)]
 
-    def _endGame(self):
-        assert len(self.playersNotOut) == 1
-        self.gameOver = True
-        loser = self.playersNotOut[0]
-        print(f'Player {loser} loses after {self.turns} turns!')
+    def _actionComponents(self, player):
+        return [player, self.openAttacks, self.closedAttacks, self.defences]
 
-        # Give loser all the cards so they know they've lost.
-        for category in [self.openAttacks, self.closedAttacks, self.defences]:
-            cards = getCards(self.state, category)
-            self.state[category][cards] = numpy.zeros(length(cards), dtype=int)
-            self.state[loser][cards] = numpy.ones(length(cards), dtype=int)
-
-    # Public methods: synchronisation needs to be considered!
-
-    def getState(self, player):
-        return copy.deepcopy(self._playerState(player))
-
-    def joinAttack(self, player, card):
-        print(f'Player {player} joins attacks: attacks with {printCard(card)}...')
-        assert player == self.activePlayer
-
-        # Check a card of this value appears on the table already somewhere.
-        openAttacks = getCards(self.state, self.openAttacks)
-        closedAttacks = getCards(self.state, self.closedAttacks)
-        defences = getCards(self.state, self.defences)
-
-        assert any(numpy.any(cards[1] == card[1]) for cards in [closedAttacks, defences])
-        assert self.state[player][card] == 1
-        totalAttacks = length(openAttacks) + length(closedAttacks)
-        assert totalAttacks < self.maxAttacks
-
-        self.state[player][card] = 0
-        self.state[self.openAttacks][card] = 1
-
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-        self._stateChanged()
-
-    def attack(self, player, cards):
-        print(f'Player {player} attacks with {printCards(cards)}...')
-        assert player == self.activePlayer
-
-        # If attacking with multiple cards, check all the values are the same
-        assert numpy.unique(cards[1]).size == 1
-        assert numpy.all(self.state[player][cards] == 1)
-
-        self.state[player][cards] = numpy.zeros(length(cards), dtype=int)
-        self.state[self.openAttacks][cards] = numpy.ones(length(cards), dtype=int)
-
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-        self._stateChanged()
-
-    def bounce(self, player, cards):
-        print(f'Player {player} bounces with {printCards(cards)}...')
-        assert player == self.activePlayer
-
-        # Check there are only open attacks
-        # Check all open attacks have same value
-        # Check these cards have that value too
-        assert player == self.defender
-        assert numberOfCards(self.state, self.closedAttacks) + numberOfCards(self.state, self.defences) == 0
-        attackValues = numpy.unique(getCards(self.state, self.openAttacks)[1])
-        assert attackValues.size == 1
-        assert numpy.all(cards[1] == attackValues[0])
-
-        self.state[self.openAttacks][cards] = numpy.ones(length(cards), dtype=int)
-        self.state[player][cards] = numpy.zeros(length(cards), dtype=int)
-
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-        self._updateAttackerAndDefender(player)
-        self._stateChanged()
-
-    def defend(self, player, defendingCard, attackingCard):
-        print(f'Player {player} defends {printCard(attackingCard)} with {printCard(defendingCard)}...')
-        assert player == self.activePlayer
-
-        (attackingCardSuit, attackingCardValue) = attackingCard
-        (defendingCardSuit, defendingCardValue) = defendingCard
-
-        assert self.state[self.openAttacks][attackingCard] == 1
-        assert self.state[player][defendingCard] == 1
-        assert (defendingCardValue > attackingCardValue and defendingCardSuit == attackingCardSuit) \
-            or self.state[self.trumps][defendingCardSuit][0] == 1 and defendingCardSuit != attackingCardSuit
-
-        self.state[self.openAttacks][attackingCard] = 0
-        self.state[self.closedAttacks][attackingCard] = 1
-        self.state[player][defendingCard] = 0
-        self.state[self.defences][defendingCard] = 1
-
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-        if numberOfCards(self.state, self.defences) == self.maxAttacks or numberOfCards(self.state, player) == 0:
-            self._successfulDefence()
-        else:
-            self._stateChanged()
-
-    def concede(self, player, attacksToConcede):
-        print(f'Player {player} concedes...')
-        assert player == self.activePlayer
-
-        numberOfOpenAttacks = numberOfCards(self.state, self.openAttacks)
-        surplus = numberOfOpenAttacks - numberOfCards(self.state, player)
-        assert surplus <= 0 and length(attacksToConcede) == numberOfOpenAttacks \
-            or 0 < surplus == length(attacksToConcede)
-        assert numpy.all(self.state[self.openAttacks][attacksToConcede] == 1)
-
-        # Concede all the defences and closed attacks
-        for category in [self.closedAttacks, self.defences]:
-            cards = getCards(self.state, category)
-            self.state[category][cards] = numpy.zeros(length(cards), dtype=int)
-            self.state[player][cards] = numpy.ones(length(cards), dtype=int)
-
-        # Concede the selected open attacks cards
-        self.state[self.openAttacks][attacksToConcede] = numpy.zeros(length(attacksToConcede), dtype=int)
-        self.state[player][attacksToConcede] = numpy.ones(length(attacksToConcede), dtype=int)
-
-        # Burn any leftover open attacks
-        leftovers = getCards(self.state, self.openAttacks)
-        self.state[self.openAttacks][leftovers] = numpy.zeros(length(leftovers), dtype=int)
-        self.state[self.burned][leftovers] = numpy.ones(length(leftovers), dtype=int)
-
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-        self._updateAttackerAndDefender(self._nextPlayer(player))
-        self.turns += 1
-        self._pickUpCards()
-
-    def declineToAttack(self, player):
-        print(f'Player {player} declines to attack...')
-        assert player == self.activePlayer
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-
-        self.declinedToAttack[player] = True
-
-        decliners = [self.declinedToAttack[player] for player in self.playersNotOut]
-        everyoneDeclined = len([() for declined in decliners if declined]) == len(self.playersNotOut) - 1
-        if length(getCards(self.state, self.openAttacks)) == 0 and everyoneDeclined:
-            print(f'Everyone declines to attack...')
-            # If this call has ended the round then we must have a successful defence.
-            self._successfulDefence()
-
-
-    def waitForUpdates(self, player):
-        print(f'Player {player} waits for updates...')
-        assert player == self.activePlayer
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-
-    def done(self, player):
-        print(f'Player {player} is out!')
-        assert player == self.activePlayer
-        self.activePlayer = self._nextPlayer(self.activePlayer)
-
-        if player == self.attacker:
-            self._updateAttackerAndDefender(self._nextPlayer(player))
-        elif player == self.defender:
-            self.defender = self._nextPlayer(player)
-        self.playersNotOut.remove(player)
-        if len(self.playersNotOut) == 1:
-            self._endGame()
-
-        self._stateChanged()
+    def _applyAction(self, action):
+        affectedState = self.state[self._actionComponents(self.activePlayer)]
+        self.state[self._actionComponents(self.activePlayer)] = numpy.add(affectedState, action)

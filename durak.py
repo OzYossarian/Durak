@@ -9,15 +9,10 @@ def main():
     numberOfPlayers = 4
     minCards = 6
     maxAttacks = 5
-    game = Game(numberOfPlayers, minCards, maxAttacks)
-    barrier = AndBarrier(numberOfPlayers)
-    players = [Player(i, game, barrier) for i in range(numberOfPlayers)]
+    players = [Player(i, maxAttacks) for i in range(numberOfPlayers)]
+    game = Game(players, minCards, maxAttacks)
 
-    threads = [threading.Thread(target=(lambda p: p.play()), args=(players[i],)) for i in range(numberOfPlayers)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    game.play()
 
 
 main()

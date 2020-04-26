@@ -1,11 +1,11 @@
 import random
 import time
-from functools import partial
 from itertools import combinations
 
 import numpy
 
-from game import getCards, numberOfCards, length
+import observables
+from game import getCards, length
 
 
 def allSublists(xs, maxSize=None):
@@ -15,139 +15,129 @@ def allSublists(xs, maxSize=None):
 
 
 class Player:
-    def __init__(self, name, game, barrier):
+    def __init__(self, name, maxAttacks):
         # Players should all believe that they are player 0, although they will have a 'true' name too.
         # The indices of the attacker and defender will then be relative to this player.
         self.name = name
-        self.game = game
-        self.barrier = barrier
-        self.waits = 0
+        self.maxAttacks = maxAttacks
 
-        # ToDo: player should hold and update beliefs about other players' cards.
-        self.cards = 0
-        self.trumps = 1
-        self.openAttacks = 2
-        self.closedAttacks = 3
-        self.defences = 4
-        self.burned = 5
+        # ToDo: player could hold and update beliefs about other players' cards?
 
-        self.attacker = 6
-        self.defender = 7
-
-    def play(self):
-        # Wait until it's our first turn:
-        [self.wait(False) for _ in range(self.name)]
-        state = self.game.getState(self.name)
-
-        while self.hasCards(state) and not self.hasLost(state):
-            state = self.takeTurn(state)
-
-        if not self.hasLost(state):
-            self.game.done(self.name)
-
-        gameOver = self.wait(True)
-        while not gameOver:
-            gameOver = self.wait(True)
-
-    def takeTurn(self, state):
-        actions = self.getPossibleActions(state)
+    def act(self, observation):
+        actions = self._getPossibleActions(observation)
         action = random.choice(actions)
-        action()
-        [self.wait(False) for _ in range(self.game.numberOfPlayers)]
-        return self.game.getState(self.name)
+        return action
 
-    def wait(self, done):
-        self.waits += 1
-        print(f'Player {self.name} barrier waiting ({self.waits})...')
-        return self.barrier.wait(done)
-
-    def hasCards(self, state):
-        return numberOfCards(state, self.cards) > 0
-
-    def hasLost(self, state):
-        return numberOfCards(state, self.cards) + numberOfCards(state, self.burned) == 52
-
-    def getPossibleActions(self, state):
+    def _getPossibleActions(self, observation):
         # Must only use the state to determine actions, nothing else.
-        openAttacks = getCards(state, self.openAttacks)
-        closedAttacks = getCards(state, self.closedAttacks)
-        defences = getCards(state, self.defences)
-        cards = getCards(state, self.cards)
+        openAttacks = getCards(observation, observables.openAttacks)
+        closedAttacks = getCards(observation, observables.closedAttacks)
+        defences = getCards(observation, observables.defences)
+        cards = getCards(observation, observables.playerCards)
 
-        if self.isDefender(state):
+        if self._isDefender(observation):
             if length(openAttacks) == 0:
                 # Can't defend until we've been attacked.
-                return [partial(self.game.waitForUpdates, self.name)]
+                return [self._createAction([])]
             actions = []
             if length(closedAttacks) + length(defences) == 0:
-                actions.extend(self.bounceActions(cards, openAttacks, state))
-            actions.extend(self.concedeActions(cards, openAttacks, state))
-            actions.extend(self.defendActions(cards, openAttacks, state))
+                actions.extend(self._bounceActions(cards, openAttacks))
+            actions.extend(self._concedeActions(cards, openAttacks, closedAttacks, defences))
+            actions.extend(self._defendActions(cards, openAttacks, observation))
             return actions
 
-        elif self.isAttacker(state) and length(openAttacks) + length(closedAttacks) == 0:
-            return list(self.attackActions(cards, state))
+        elif self._isAttacker(observation) and length(openAttacks) + length(closedAttacks) == 0:
+            return list(self._attackActions(cards))
 
         # Can only attack if defender has elected to defend and there are fewer than 'maxAttacks' attacks already.
-        elif length(defences) > 0 and length(openAttacks) + length(closedAttacks) < self.game.maxAttacks:
-            actions = [partial(self.game.declineToAttack, self.name)]
-            actions.extend(self.joinAttackActions(cards, closedAttacks, defences, state))
+        elif length(defences) > 0 and length(openAttacks) + length(closedAttacks) < self.maxAttacks:
+            # Can always decline to attack.
+            actions = [self._createAction([])]
+            actions.extend(self._joinAttackActions(cards, closedAttacks, defences))
             return actions
 
         else:
-            return [partial(self.game.waitForUpdates, self.name)]
+            return [self._createAction([])]
 
-    def concedeActions(self, cards, openAttacks, state):
+    def _concedeActions(self, cards, openAttacks, closedAttacks, defences):
         # If there are more open attacks than we have cards, then only pick up as many as we have cards.
         actions = []
+        pickUpClosedAttacks = [
+            (observables.playerCards, closedAttacks, 1),
+            (observables.closedAttacks, closedAttacks, -1)]
+        pickUpDefences = [(observables.playerCards, defences, 1), (observables.defences, defences, -1)]
+
         surplusAttacks = length(openAttacks) - length(cards)
         if surplusAttacks > 0:
             for attacks in combinations(numpy.array(openAttacks).T, surplusAttacks):
-                actions.append(partial(self.game.concede, self.name, tuple(numpy.array(attacks).T)))
+                attacks = tuple(numpy.array(attacks).T)
+                # Concede all the defences and closed attacks
+                pickUpOpenAttacks = [(observables.playerCards, attacks, 1), (observables.openAttacks, attacks, -1)]
+                action = self._createAction(pickUpClosedAttacks + pickUpOpenAttacks + pickUpDefences)
+                actions.append(action)
         else:
-            actions.append(partial(self.game.concede, self.name, openAttacks))
+            pickUpOpenAttacks = [(observables.playerCards, openAttacks, 1), (observables.openAttacks, openAttacks, -1)]
+            action = self._createAction(pickUpClosedAttacks + pickUpOpenAttacks + pickUpDefences)
+            actions.append(action)
         return actions
 
-    def joinAttackActions(self, cards, closedAttacks, defences, state):
+    def _joinAttackActions(self, cards, closedAttacks, defences):
         # Can only attack with cards whose values are already on the table.
         valuesAllowed = numpy.concatenate((closedAttacks[1], defences[1]), axis=None)
         indices = numpy.where(numpy.isin(cards[1], valuesAllowed))[0]
         for i in indices:
             card = (cards[0][i], cards[1][i])
-            yield partial(self.game.joinAttack, self.name, card)
+            yield self._createAction([(observables.playerCards, card, -1), (observables.openAttacks, card, 1)])
 
-    def attackActions(self, cards, state):
+    def _attackActions(self, cards):
         # Can attack with multiple cards of the same value
         for value in range(13):
             valueCards = numpy.array(cards).T[numpy.where(cards[1] == value)]
             attacks = allSublists(valueCards)
             for attack in attacks:
-                yield partial(self.game.attack, self.name, tuple(attack.T))
+                yield self._createAction([
+                    (observables.playerCards, tuple(attack.T), -1),
+                    (observables.openAttacks, tuple(attack.T), 1)])
 
-    def defendActions(self, cards, openAttacks, state):
+    def _defendActions(self, cards, openAttacks, observation):
         # ToDo: optimise all this switching between numpy arrays and tuples
         for attack in numpy.array(openAttacks).T:
             for card in numpy.array(cards).T:
-                if self.canDefend(attack, card, state):
-                    yield partial(self.game.defend, self.name, tuple(card.T), tuple(attack.T))
+                if self._canDefend(attack, card, observation):
+                    addDefence = [
+                        (observables.playerCards, tuple(card.T), -1),
+                        (observables.defences, tuple(card.T), 1)]
+                    closeAttack = [
+                        (observables.openAttacks, tuple(attack.T), -1),
+                        (observables.closedAttacks, tuple(attack.T), 1)]
+                    yield self._createAction(addDefence + closeAttack)
 
-    def bounceActions(self, cards, openAttacks, state):
+    def _bounceActions(self, cards, openAttacks):
         attackValue = openAttacks[1][0]
         bounceCards = numpy.array(cards).T[numpy.where(cards[1] == attackValue)]
         bounces = allSublists(bounceCards)
         for bounce in bounces:
-            yield partial(self.game.bounce, self.name, tuple(bounce.T))
+            yield self._createAction([
+                (observables.playerCards, tuple(bounce.T), -1),
+                (observables.openAttacks, tuple(bounce.T), 1)])
 
-    def isDefender(self, state):
-        return state[self.defender][0][0] == 0
+    def _createAction(self, changes):
+        action = numpy.zeros((4, 4, 13), dtype=int)
+        for category, cards, value in changes:
+            action[category][cards] = numpy.full(length(cards), value, dtype=int)
+        return action
 
-    def isAttacker(self, state):
-        return state[self.attacker][0][0] == 0
+    def _isDefender(self, observation):
+        return observation[observables.defender][0][0] == 0
 
-    def canDefend(self, attack, card, state):
+    def _isAttacker(self, observation):
+        return observation[observables.attacker][0][0] == 0
+
+    def _canDefend(self, attack, card, observation):
         (attackSuit, attackValue) = tuple(attack)
         (suit, value) = tuple(card)
         if suit == attackSuit:
             return value > attackValue
         else:
-            return state[self.trumps][suit][0] == 1
+            return observation[observables.trumps][suit][0] == 1
+
