@@ -140,4 +140,3 @@ class Player:
             return value > attackValue
         else:
             return observation[observables.trumps][suit][0] == 1
-
