@@ -17,9 +17,7 @@ In all, there are (13 * 4) + (13 * 6) + (13 * 4) + (13 * 1) = 52 + 78 + 52 + 13 
 1-card bounces, 13C1 * 4C2 2-card bounces and 13C1 * 4C3 3-card attacks. So in total, 52 + 78 + 52 = 182 bounces.
 
 4. 'defence' - a defence always consists of two cards; the one we're playing and the open attack that we're closing.
-Order matters here, so we have 52P2 ('52 permute 2') actions = 2652. We could do slightly better - e.g. a 2 of spades
-can only beat a 3 or higher if the 2 is a trump and the other card is not. This reasoning gives 2340 actions via the
-formula 4 * \sum_{i=39}^{51}. But it might be simpler to say there are 2652 actions but 312 of them are invalid.
+For ease of encoding we just say there are 52 * 52 = 2704 defences, but a few hundred or so are never valid.
 
 5. 'concede' - can now change rules back to O.G. rules! We can prevent the attacker from attacking with more cards
 than the defender has, so there will no longer be a situation where the defender chooses which cards to pick up.
