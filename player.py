@@ -1,10 +1,7 @@
 import random
 import numpy
-
 from itertools import combinations
-
 from cardUtils import length
-from masker import Masker
 
 
 def allSublists(xs, maxSize=None):
@@ -19,16 +16,15 @@ class Player:
         # The indices of the attacker and defender will then be relative to this player.
         self.name = name
         self.game = game
-        self.masker = Masker()
 
         # ToDo: player could hold and update beliefs about other players' cards?
 
     def act(self, observation):
-        actionMask = self._getActionMask()
+        actionMask = self.getActionMask()
         action = random.choice(numpy.where(actionMask == 1)[0])
         return action
 
-    def _getActionMask(self):
+    def getActionMask(self):
         openAttacks = self.game.getCards(self.game.openAttacks)
         closedAttacks = self.game.getCards(self.game.closedAttacks)
         defences = self.game.getCards(self.game.defences)
@@ -36,26 +32,26 @@ class Player:
 
         if self.name == self.game.getDefender():
             # Can always concede
-            actions = [self.masker.concedeIndex]
+            actions = [self.game.masker.concedeIndex]
             if length(closedAttacks) + length(defences) == 0:
                 actions.extend(self._bounceActions(cards, openAttacks))
             actions.extend(self._defendActions(cards, openAttacks))
-            return self.masker.mask(actions)
+            return self.game.masker.mask(actions)
 
         elif self.name == self.game.getAttacker() and length(openAttacks) + length(closedAttacks) == 0:
-            return self.masker.mask(list(self._attackActions(cards)))
+            return self.game.masker.mask(list(self._attackActions(cards)))
 
         # Can only attack if there are fewer than 'maxAttacks' attacks already.
         elif length(openAttacks) + length(closedAttacks) < self.game.maxAttacks:
             assert length(defences) > 0
             assert length(self.game.getCards(self.game.getDefender())) > 0
             # Can always decline to attack.
-            actions = [self.masker.declineToAttackIndex]
+            actions = [self.game.masker.declineToAttackIndex]
             actions.extend(self._joinAttackActions(cards, closedAttacks, defences))
-            return self.masker.mask(actions)
+            return self.game.masker.mask(actions)
 
         else:
-            return self.masker.mask([self.masker.declineToAttackIndex])
+            return self.game.masker.mask([self.game.masker.declineToAttackIndex])
 
     def _joinAttackActions(self, cards, closedAttacks, defences):
         # Can only attack with cards whose values are already on the table.
@@ -63,7 +59,7 @@ class Player:
         indices = numpy.where(numpy.isin(cards[1], valuesAllowed))[0]
         for i in indices:
             card = (cards[0][i], cards[1][i])
-            yield self.masker.joinAttackIndex(card)
+            yield self.game.masker.joinAttackIndex(card)
 
     def _attackActions(self, cards):
         # Can attack with multiple cards of the same value.
@@ -73,14 +69,14 @@ class Player:
             valueCards = numpy.array(cards).T[numpy.where(cards[1] == value)]
             attacks = allSublists(valueCards, maxSize)
             for attack in attacks:
-                yield self.masker.attackIndex(tuple(attack.T))
+                yield self.game.masker.attackIndex(tuple(attack.T))
 
     def _defendActions(self, cards, openAttacks):
         # ToDo: optimise all this switching between numpy arrays and tuples?
         for attack in numpy.array(openAttacks).T:
             for card in numpy.array(cards).T:
                 if self._canDefend(attack, card):
-                    yield self.masker.defenceIndex(tuple(attack), tuple(card))
+                    yield self.game.masker.defenceIndex(tuple(attack), tuple(card))
 
     def _bounceActions(self, cards, openAttacks):
         attackValue = openAttacks[1][0]
@@ -91,7 +87,7 @@ class Player:
         if maxSize > 0:
             bounces = allSublists(bounceCards, maxSize)
             for bounce in bounces:
-                yield self.masker.bounceIndex(tuple(bounce.T))
+                yield self.game.masker.bounceIndex(tuple(bounce.T))
 
     def _canDefend(self, attack, card):
         (attackSuit, attackValue) = tuple(attack)

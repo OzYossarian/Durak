@@ -32,7 +32,7 @@ class Masker:
         values = set(cards[1])
         assert len(values) == 1
         value = values.pop()
-        # Once assertion works, just do:
+        # ToDo: Once assertion works, just do:
         # value = cards[1][0]
         return self.attackStart + (value * len(self.fourCombos)) + self.fourCombos.index(tuple(cards[0]))
 
@@ -43,20 +43,19 @@ class Masker:
         values = set(cards[1])
         assert len(values) == 1
         value = values.pop()
-        # Once assertion works, just do:
+        # ToDo: Once assertion works, just do:
         # value = cards[1][0]
         return self.bounceStart + (value * len(self.threeCombos)) + self.threeCombos.index(tuple(cards[0]))
 
     def defenceIndex(self, attack, defence):
         return self.defendStart + self.defenceTable[attack[0]][attack[1]][defence[0]][defence[1]]
 
+    def blankMask(self):
+        return numpy.zeros(self.totalActions, dtype=int)
+
     def mask(self, validActions):
         mask = numpy.zeros(self.totalActions, dtype=int)
-        try:
-            mask[validActions] = 1
-        except:
-            print(f'Valid actions: {validActions}')
-            raise AssertionError
+        mask[validActions] = 1
         return mask
 
     def action(self, actionIndex):

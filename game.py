@@ -1,12 +1,12 @@
-import copy
 import random
 import numpy
 
-from cardUtils import numberOfCards, printSuit, printCards, printCard, length
+from cardUtils import numberOfCards, printSuit, printCards, length
 from masker import Masker
 from player import Player
 
-class Game:
+
+class Game():
     def __init__(self, numberOfPlayers, minCards, maxAttacks):
         self.numberOfPlayers = numberOfPlayers
         self.minCards = minCards
@@ -23,21 +23,31 @@ class Game:
         self.burned = self.numberOfPlayers + 6
         self.pack = self.numberOfPlayers + 7
 
-        self.declinedToAttack = 0
-        self.playersNotOut = list(range(self.numberOfPlayers))
-        self.activePlayer = None
-
         self.masker = Masker()
 
-        self.turns = 0
-        self._initialiseState()
+        # Initialise these later
+        self.state = None
+        self.declinedToAttack = None
+        self.playersNotOut = None
+        self.activePlayer = None
+        self.turns = None
+        self.gameOver = None
+
+    def step(self):
+        observation = self.observation(self.activePlayer)
+        action = self.players[self.activePlayer].act(observation)
+        self.updateState(action)
+
+    def updateState(self, actionIndex):
+        actions = [self._attack, self._joinAttack, self._bounce, self._defend, self._concede, self._declineToAttack]
+        action, data = self.masker.action(actionIndex)
+        actions[action](data)
+        self.gameOver = len(self.playersNotOut) == 1
 
     def play(self):
         gameOver = False
         while not gameOver:
-            observation = self._observation(self.activePlayer)
-            action = self.players[self.activePlayer].act(observation)
-            self._updateState(action)
+            self.step()
             gameOver = len(self.playersNotOut) == 1
 
     def getCards(self, category):
@@ -58,7 +68,12 @@ class Game:
     def getTrumps(self):
         return numpy.where(self.state[self.trumps] == 1)[0][0]
 
-    def _initialiseState(self):
+    def initialiseState(self):
+        self.declinedToAttack = 0
+        self.playersNotOut = list(range(self.numberOfPlayers))
+        self.turns = 0
+        self.gameOver = False
+
         self.state = numpy.zeros((self.numberOfPlayers + 8, 4, 13), dtype=int)
 
         trumps = random.randrange(4)
@@ -101,7 +116,7 @@ class Game:
 
         self.declinedToAttack = 0
 
-    def _observation(self, player):
+    def observation(self, player):
         # Attacker and defender should be relative to this player.
         attacker = (self.getAttacker() - player) % self.numberOfPlayers
         defender = (self.getDefender() - player) % self.numberOfPlayers
@@ -110,11 +125,6 @@ class Game:
 
         observables = [player, self.openAttacks, self.closedAttacks, self.defences, self.trumps, self.burned]
         return numpy.concatenate((self.state[observables], [attacker, defender]), axis=0)
-
-    def _updateState(self, actionIndex):
-        actions = [self._attack, self._joinAttack, self._bounce, self._defend, self._concede, self._declineToAttack]
-        action, data = self.masker.action(actionIndex)
-        actions[action](data)
 
     def _attack(self, attackCards):
         print(f'Player {self.activePlayer} attacks with {printCards(attackCards)}...')
@@ -187,7 +197,7 @@ class Game:
         assert self.state[self.openAttacks][attack] == 1
         assert self.state[self.activePlayer][defence] == 1
         assert (defenceValue > attackingValue and defenceSuit == attackSuit) \
-            or self.state[self.trumps][defenceSuit][0] == 1 and defenceSuit != attackSuit
+               or self.state[self.trumps][defenceSuit][0] == 1 and defenceSuit != attackSuit
 
         self.state[self.openAttacks][attack] = 0
         self.state[self.closedAttacks][attack] = 1
@@ -260,7 +270,7 @@ class Game:
         self._pickUpCards(firstToPickUp)
 
     def _setAttacker(self, attacker):
-        self.state[self.attacker] = numpy.full((4,13), attacker, dtype=int)
+        self.state[self.attacker] = numpy.full((4, 13), attacker, dtype=int)
 
     def _setDefender(self, defender):
         self.state[self.defender] = numpy.full((4, 13), defender, dtype=int)
