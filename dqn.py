@@ -71,6 +71,8 @@ def trainAgent(agent, iterator, replay_observer, train_env):
 
     saveAgent(agent)
 
+    # checkpoint.restore(path).assert_consumed()
+
 
 def saveAgent(agent):
     checkpoint = tf.train.Checkpoint(q_net=agent._target_q_network)
@@ -124,7 +126,6 @@ def setupReplayBuffer(agent, train_env):
     iterator = iter(dataset)
     return iterator, replay_observer
 
-
 def createAgent(train_durak, train_env):
     q_net = QNetwork(
         train_env.observation_spec(),
@@ -163,6 +164,17 @@ def compute_avg_return(environment, policy, num_episodes=10):
 
     avg_return = total_return / num_episodes
     return avg_return.numpy()[0]
+
+
+def loadLatestNetwork(train_durak):
+    train_env = TFPyEnvironment(TimeLimit(train_durak, duration=1000))
+    agent = createAgent(train_durak, train_env)
+
+    checkpoint = tf.train.Checkpoint(q_net=agent._target_q_network)
+    directory = f'{projectPath}/Checkpoints'
+    status = checkpoint.restore(tf.train.latest_checkpoint(directory))
+    status.assert_consumed()
+    print('Loaded network!')
 
 
 def loadLatestPolicy():
