@@ -16,7 +16,7 @@ tf.compat.v1.enable_v2_behavior()
 
 # ToDo: hyperparameters!
 
-num_iterations = 100
+num_iterations = 1000
 
 initial_collect_steps = 1000
 collect_steps_per_iteration = 1
@@ -24,7 +24,7 @@ replay_buffer_max_length = 100000
 
 batch_size = 64
 learning_rate = 1e-3
-log_interval = 10
+log_interval = 100
 
 num_eval_episodes = 1
 eval_interval = 100
@@ -75,11 +75,12 @@ def trainAgent(agent, iterator, replay_observer, train_env):
 
 
 def saveAgent(agent):
-    checkpoint = tf.train.Checkpoint(q_net=agent._target_q_network)
+    checkpoint = tf.train.Checkpoint(agent=agent)
     now = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    checkpointPath = f'{projectPath}/Checkpoints/{now}_QNetwork_'
+    checkpointPath = f'{projectPath}/Checkpoints/{now}_Agent'
     checkpoint.save(checkpointPath)
-    print('Saved network!')
+    print('Saved agent!')
+
     PolicySaver(agent.policy).save(f'{projectPath}/Policies/{now}_Policy')
     print('Saved policy!')
 
@@ -166,15 +167,15 @@ def compute_avg_return(environment, policy, num_episodes=10):
     return avg_return.numpy()[0]
 
 
-def loadLatestNetwork(train_durak):
+def loadLatestAgent(train_durak):
     train_env = TFPyEnvironment(TimeLimit(train_durak, duration=1000))
     agent = createAgent(train_durak, train_env)
 
-    checkpoint = tf.train.Checkpoint(q_net=agent._target_q_network)
+    checkpoint = tf.train.Checkpoint(agent=agent)
     directory = f'{projectPath}/Checkpoints'
     status = checkpoint.restore(tf.train.latest_checkpoint(directory))
     status.assert_consumed()
-    print('Loaded network!')
+    print('Loaded agent!')
 
 
 def loadLatestPolicy():
