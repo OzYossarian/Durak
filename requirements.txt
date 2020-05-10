@@ -1,1 +1,2 @@
 tf-agents
+tensorflow==2.1
