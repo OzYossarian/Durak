@@ -3,6 +3,8 @@ import tensorflow as tf
 import tf_agents.trajectories.time_step as time_step
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
+
+import observables
 from game import Game
 
 
@@ -34,10 +36,17 @@ class DurakEnvironment(py_environment.PyEnvironment):
         return self._observation_spec
 
     def observation_and_action_constraint_splitter(self, observation):
-        actionMask = self.player.getActionMask() if not self.game.gameOver else self.game.masker.blankMask()
-        tensorShape = [1, self.game.masker.totalActions]
-        actionMask = tf.reshape(tf.convert_to_tensor(actionMask), tensorShape)
-        return observation, actionMask
+        actionMask = self.player.getActionMask(observation.numpy()[0]) \
+            if not self.game.gameOver \
+            else self.game.masker.blankMask()
+        maskShape = [1, self.game.masker.totalActions]
+        actionMask = tf.reshape(tf.convert_to_tensor(actionMask), maskShape)
+
+        playerObservation = observables.playerObservation(observation.numpy()[0])
+        observationShape = [1, 8, 4, 13]
+        playerObservation = tf.reshape(tf.convert_to_tensor(playerObservation), observationShape)
+
+        return playerObservation, actionMask
 
     def _reset(self):
         self.game.initialiseState()

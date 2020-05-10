@@ -18,3 +18,4 @@ network.
 
 - The change above would mean we could implement the evaluation part of the training loop without using
 checkpoints, but am still not sure that the checkpoint.restore stuff is actually restoring a trained policy.
+AHH but then we could save the policy using the PolicySaver rather than with checkpoints?
